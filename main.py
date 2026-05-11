@@ -3,6 +3,7 @@ from server import Server
 import logging
 from config import Config
 
+# Entry point to parse arguments and start the RunDB server
 def main():
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)

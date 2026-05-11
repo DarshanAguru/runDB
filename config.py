@@ -1,4 +1,5 @@
 
+# Global configuration settings for the RunDB server
 class Config:
     HOST = "0.0.0.0"
     PORT = 7379

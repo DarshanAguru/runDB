@@ -3,10 +3,11 @@ import socket
 import logging
 from typing import Protocol
 import time
-from core import Core, RedisCmd, Evaluator, FDComm, Store, Expiration
+from core import RESPProcessor, RedisCmd, Evaluator, FDComm, Store, Expiration
 from config import Config
 
 
+# Empty class for type hinting
 class ConnectionLike(Protocol):
     def recv(self, size: int) -> bytes:
         ...
@@ -17,13 +18,14 @@ class ConnectionLike(Protocol):
 
 class Server:
 
+    # Reads a raw message from the connection and decodes it into a RedisCmd
     @staticmethod
     def __readCommand(con: ConnectionLike) -> tuple[RedisCmd | None, Exception | None]:
         try:
             msg = con.recv(1024)
             if len(msg) == 0:
                 return None, None
-            tokens, err = Core.decodeArrayString(msg)
+            tokens, err = RESPProcessor.decodeArrayString(msg)
             if err is not None:
                 return None, err
             if tokens is None or len(tokens) == 0:
@@ -45,6 +47,7 @@ class Server:
         if err is not None:
             Server.__respondError(err, con)
 
+    # Periodically samples and deletes expired keys from the store
     @staticmethod
     def __deleteExpiredKeys(logger: logging.Logger) -> None:
         frac = Expiration.expireSamples()
@@ -53,6 +56,7 @@ class Server:
         logger.debug(f"Frac: {frac}")
         logger.debug(f"Deleted the expired but undeleted keys. total keys: {len(Store.store)}")
 
+    # Main loop for the high-concurrency asynchronous server using epoll
     @staticmethod
     def runAsyncTcpServer(host: str, port: int, logger: logging.Logger) -> None:
         logger.info("Starting the Asynchronous TCP Server")
@@ -63,25 +67,32 @@ class Server:
 
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serverSock:
+                # Initialize TCP socket (IPv4, Streaming)
                 serverSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 serverSock.bind((host, port))
                 serverSock.listen()
-                serverSock.setblocking(False)
+                serverSock.setblocking(False) # Non-blocking for async handling
                 logger.info(f"Server Listening on {host}:{port}")
+                
+                # Initialize epoll for event-driven I/O
                 epoll = select.epoll()
                 try:
+                    # Register server socket to listen for incoming connections
                     epoll.register(serverSock.fileno(), select.EPOLLIN)
                     while True:
                         
+                        # Background task to clean up expired keys
                         if time.time() - last_cron_exec_time_sec >= cron_freq_sec:
                             Server.__deleteExpiredKeys(logger)
                             last_cron_exec_time_sec = time.time()
 
+                        # Wait for I/O events (blocks until an event occurs)
                         events = epoll.poll()
                         for fd, event in events:
+                            # Accept new connections
                             if fd == serverSock.fileno():
                                 sock, addr = serverSock.accept()
-                                sock.setblocking(False)
+                                sock.setblocking(False) # Ensure client socket is also non-blocking
                                 con_clients += 1
                                 if con_clients > Config.MAX_CLIENTS:
                                     logger.warning(f"Maximum number of clients reached: {con_clients}")
@@ -89,9 +100,11 @@ class Server:
                                     con_clients -= 1
                                     continue
                                 clients[sock.fileno()] = sock
+                                # Register client socket to watch for incoming data
                                 epoll.register(sock.fileno(), select.EPOLLIN)
                                 logger.info(f"Connected to remote address: {addr} and fd: {sock.fileno()}, no. of concurrent clients: {con_clients}")
                             else:
+                                # Handle client disconnection or errors
                                 if event & (select.EPOLLHUP | select.EPOLLERR):
                                     epoll.unregister(fd)
                                     sock = clients.pop(fd, None)
@@ -100,7 +113,8 @@ class Server:
                                     con_clients -= 1
                                     logger.info(f"Connection closed for fd: {fd}, no. of concurrent clients: {con_clients}")
                                     continue
-
+                                
+                                # Handle incoming data from an existing client
                                 comm = FDComm(fd)
                                 cmd, err = Server.__readCommand(comm)
                                 if err is not None:

@@ -3,6 +3,7 @@ import time
 from config import Config
 
 
+# Represents a stored value with its expiration metadata
 class Value:
     def __init__(self, val: Any, ex_duration_ms: int) -> None:
         self.val = val
@@ -19,6 +20,7 @@ class Value:
     def getValue(self) -> Any:
         return self.val
     
+    # Checks if the current time has surpassed the expiration timestamp
     def isExpired(self) -> bool:
         if self.expire_at == -1:
             return False    
@@ -28,9 +30,11 @@ class Value:
 
 
 
+# In-memory dictionary-based storage with eviction and lazy-deletion
 class Store:
     store: Dict[str, Value] = dict()
 
+    # Adds or updates a key; triggers eviction if the KEY_LIMIT is reached
     @classmethod
     def put(cls, key: str, value: Value) -> None:
         if (len(cls.store) >= Config.KEY_LIMIT):
@@ -38,6 +42,7 @@ class Store:
             Eviction.evict()
         cls.store[key] = value
 
+    # Retrieves a value; performs lazy-deletion if the key is found but expired
     @classmethod
     def get(cls, key: str) -> Value | None:
         val = cls.store.get(key, None)

@@ -18,6 +18,7 @@ TTL_EXPIRED = b":-2\r\n"
 
 
 class Evaluator:
+    # Main entry point to evaluate a command and send the response back
     @staticmethod
     def evalAndRespond(cmd: RedisCmd, conn: SupportsSend) -> Exception | None:
         if cmd.cmd == "PING":
@@ -44,6 +45,7 @@ class Evaluator:
         except Exception as err:
             return err
 
+    # Handles the SET command with optional EX (expiration in seconds)
     @staticmethod
     def __evalSET(args: List[str], conn: SupportsSend) -> Exception | None:
         if len(args) <= 1:
@@ -77,6 +79,7 @@ class Evaluator:
             return err
 
 
+    # Handles the GET command, checking for existence and expiration
     @staticmethod
     def __evalGET(args: List[str], conn: SupportsSend) -> Exception | None:
         if len(args) != 1:
@@ -104,6 +107,7 @@ class Evaluator:
             return err
         
     
+    # Returns the remaining Time To Live in seconds for a key
     @staticmethod
     def __evalTTL(args: List[str], conn: SupportsSend) -> Exception | None:
         if len(args) != 1:
@@ -135,6 +139,7 @@ class Evaluator:
         except Exception as err:
             return err
     
+    # Deletes one or more keys and returns the count of deleted keys
     @staticmethod
     def __evalDEL(args: List[str], conn: SupportsSend) -> Exception | None:
         count_deleted = 0
@@ -150,6 +155,7 @@ class Evaluator:
         except Exception as err:
             return err
     
+    # Sets or updates the expiration of an existing key
     @staticmethod
     def __evalEXPIRE(args: List[str], conn: SupportsSend) -> Exception | None:
         if len(args) <= 1:
@@ -180,6 +186,7 @@ class Evaluator:
             return err
 
 
+    # Simple PING/PONG for connectivity checks
     @staticmethod
     def __evalPING(args: List[str], conn: SupportsSend) -> Exception | None:
 
@@ -198,6 +205,7 @@ class Evaluator:
             return err
 
     
+    # Encodes data into RESP format based on type and flags
     @staticmethod
     def __encode(val: Any, bulk: bool = False, err: bool = False) -> bytes:
         if val is NIL:

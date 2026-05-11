@@ -2,6 +2,7 @@ from .store import Store
 
 class Expiration:
     
+    # Samples a subset of keys and deletes those that have expired
     @staticmethod
     def expireSamples() -> float:
         limit = 20
