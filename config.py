@@ -5,3 +5,5 @@ class Config:
     PORT = 7379
     KEY_LIMIT = 20_000
     MAX_CLIENTS = 10_000
+    AOF_FILE = "run-master.aof"
+    EVICTION_STRATEGY = "simple-first"

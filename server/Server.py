@@ -6,6 +6,7 @@ import time
 from core import RESPProcessor, RedisCmd, Evaluator, FDComm, Store, Expiration
 from config import Config
 
+logger = logging.getLogger(__name__)
 
 # Empty class for type hinting
 class ConnectionLike(Protocol):
@@ -61,7 +62,7 @@ class Server:
 
     # Periodically samples and deletes expired keys from the store
     @staticmethod
-    def __deleteExpiredKeys(logger: logging.Logger) -> None:
+    def __deleteExpiredKeys() -> None:
         frac = Expiration.expireSamples()
         while frac > 0.25:
             frac = Expiration.expireSamples()
@@ -70,7 +71,7 @@ class Server:
 
     # Main loop for the high-concurrency asynchronous server using epoll
     @staticmethod
-    def runAsyncTcpServer(host: str, port: int, logger: logging.Logger) -> None:
+    def runAsyncTcpServer(host: str, port: int) -> None:
         logger.info("Starting the Asynchronous TCP Server")
         con_clients = 0
         cron_freq_sec = 1
@@ -95,7 +96,7 @@ class Server:
                         
                         # Background task to clean up expired keys
                         if time.time() - last_cron_exec_time_sec >= cron_freq_sec:
-                            Server.__deleteExpiredKeys(logger)
+                            Server.__deleteExpiredKeys()
                             last_cron_exec_time_sec = time.time()
 
                         # Wait for I/O events (blocks until an event occurs)
@@ -162,7 +163,7 @@ class Server:
         
 
     @staticmethod
-    def runSyncTcpServer(host: str, port: int, logger: logging.Logger) -> None:
+    def runSyncTcpServer(host: str, port: int) -> None:
         logger.info("Starting the Synchronous TCP Server")
         con_clients = 0
 
@@ -200,5 +201,3 @@ class Server:
                 logger.error(f"Server error: {e}")
             finally:
                 logger.info("Exiting server")
-        
-        

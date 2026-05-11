@@ -2,6 +2,7 @@ from typing import Protocol, List, Any
 from .RedisCmd import RedisCmd
 import time
 from .store import Value, Store
+from multiprocessing import Process
 
 class SupportsSend(Protocol):
     def send(self, data: bytes) -> int:
@@ -33,6 +34,8 @@ class Evaluator:
                 res = Evaluator.__evalDEL(cmd.args)
             elif cmd.cmd == "EXPIRE":
                 res = Evaluator.__evalEXPIRE(cmd.args)
+            elif cmd.cmd == "BGREWRITEAOF":
+                res = Evaluator.__evalBGREWRITEAOF(cmd.args)
             else:
                 res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
             
@@ -88,7 +91,7 @@ class Evaluator:
         if val is None or val.isExpired():
             return RESP_NIL
         
-        return Evaluator.__encode(val.getValue(), bulk=True)
+        return Evaluator.encode(val.getValue(), bulk=True)
     
     # Returns the remaining Time To Live in seconds for a key
     @staticmethod
@@ -109,7 +112,7 @@ class Evaluator:
             return RESP_MINUS_TWO
 
         duration_ms = val.getExpiresAt() - time.time() * 1000
-        return Evaluator.__encode(int(duration_ms // 1000))
+        return Evaluator.encode(int(duration_ms // 1000))
     
     # Deletes one or more keys and returns the count of deleted keys
     @staticmethod
@@ -118,7 +121,7 @@ class Evaluator:
         for key in args:
             if Store.delete(key):
                 count_deleted += 1
-        return Evaluator.__encode(count_deleted)
+        return Evaluator.encode(count_deleted)
     
     # Sets or updates the expiration of an existing key
     @staticmethod
@@ -138,6 +141,16 @@ class Evaluator:
         
         val.setExpiresAt(ex_duration_sec * 1000)
         return RESP_ONE
+    
+    # Background rewrite of the AOF file using forking
+    @staticmethod
+    def __evalBGREWRITEAOF(args: List[str]) -> bytes:
+        #importing inside function to avoid circular import
+        from .aof import AOF
+        # This is called in a separate process to avoid blocking the main event loop
+        process = Process(target = AOF.dumpAllAOF)
+        process.start()
+        return RESP_OK
 
     # Simple PING/PONG for connectivity checks
     @staticmethod
@@ -148,13 +161,20 @@ class Evaluator:
         if len(args) == 0:
             return b"+PONG\r\n"
         else:
-            return Evaluator.__encode(args[0], bulk=True)
+            return Evaluator.encode(args[0], bulk=True)
     
     # Encodes data into RESP format based on type and flags
     @staticmethod
-    def __encode(val: Any, bulk: bool = False) -> bytes:
+    def encode(val: Any, bulk: bool = False) -> bytes:
         if isinstance(val, int):
             return f":{val}\r\n".encode("utf-8")
+        
+        if isinstance(val, list):
+            res = b"*" + str(len(val)).encode("utf-8") + b"\r\n"
+            for item in val:
+                # Array elements are encoded as bulk strings by default for commands
+                res += Evaluator.encode(item, bulk=True)
+            return res
         
         if bulk:
             return f"${len(val)}\r\n{val}\r\n".encode("utf-8")

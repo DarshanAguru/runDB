@@ -14,8 +14,8 @@ def main():
    
     logger.info("Running the RunDB")
     
-    # Server.runSyncTcpServer(args.host, args.port, logger) #Sync Server, only one client at a time
-    Server.runAsyncTcpServer(args.host, args.port, logger) #Async Server, can handle multiple clients.
+    # Server.runSyncTcpServer(args.host, args.port) #Sync Server, only one client at a time
+    Server.runAsyncTcpServer(args.host, args.port) #Async Server, can handle multiple clients.
 
 if __name__ == "__main__":
     main()
