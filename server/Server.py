@@ -18,22 +18,34 @@ class ConnectionLike(Protocol):
 
 class Server:
 
-    # Reads a raw message from the connection and decodes it into a RedisCmd
+    # Reads raw messages from the connection and decodes them into a list of RedisCmds (pipelining)
     @staticmethod
-    def __readCommand(con: ConnectionLike) -> tuple[RedisCmd | None, Exception | None]:
+    def __readCommands(con: ConnectionLike) -> tuple[list[RedisCmd] | None, Exception | None]:
         try:
             msg = con.recv(1024)
             if len(msg) == 0:
                 return None, None
-            tokens, err = RESPProcessor.decodeArrayString(msg)
+            
+            # decode returns a list of all RESP objects found in the message
+            vals, err = RESPProcessor.decode(msg)
             if err is not None:
                 return None, err
-            if tokens is None or len(tokens) == 0:
-                return None, Exception("Invalid Command")
-            return RedisCmd(
-                tokens[0].upper(),
-                tokens[1:]
-            ), None
+            
+            cmds = []
+            for v in vals:
+                # Each command must be a RESP array (represented as a list in Python)
+                if not isinstance(v, list) or len(v) == 0:
+                    continue # Skip invalid commands or empty arrays
+                
+                cmds.append(RedisCmd(
+                    str(v[0]).upper(),
+                    [str(arg) for arg in v[1:]]
+                ))
+            
+            if not cmds:
+                return None, Exception("No valid commands found")
+                
+            return cmds, None
         except Exception as err:
             return None, err
 
@@ -42,8 +54,8 @@ class Server:
         con.send(b"-"+f"{err}".encode("utf-8")+b"\r\n")
 
     @staticmethod
-    def __respond(cmd: RedisCmd, con: ConnectionLike) -> None:
-        err = Evaluator.evalAndRespond(cmd, con)
+    def __respond(cmds: list[RedisCmd], con: ConnectionLike) -> None:
+        err = Evaluator.evalAndRespond(cmds, con)
         if err is not None:
             Server.__respondError(err, con)
 
@@ -116,7 +128,7 @@ class Server:
                                 
                                 # Handle incoming data from an existing client
                                 comm = FDComm(fd)
-                                cmd, err = Server.__readCommand(comm)
+                                cmds, err = Server.__readCommands(comm)
                                 if err is not None:
                                     logger.error(f"Error reading from fd: {fd}: {err}")
                                     epoll.unregister(fd)
@@ -125,7 +137,7 @@ class Server:
                                         sock.close()
                                     con_clients -= 1
                                     continue
-                                if not cmd:
+                                if not cmds:
                                     epoll.unregister(fd)
                                     sock = clients.pop(fd, None)
                                     if sock is not None:
@@ -133,8 +145,9 @@ class Server:
                                     con_clients -= 1
                                     logger.info(f"Connection closed for fd: {fd}, no. of concurrent clients: {con_clients}")
                                     continue
-                                logger.debug(f"Received command from fd: {fd}: {cmd.cmd} {cmd.args}")
-                                Server.__respond(cmd, comm)
+                                
+                                logger.debug(f"Received {len(cmds)} commands from fd {fd}")
+                                Server.__respond(cmds, comm)
                 except OSError as err:
                     logger.error(f"Epoll error: {err}")
                 except KeyboardInterrupt:
@@ -166,15 +179,15 @@ class Server:
                     logger.info(f"Connected to remote address: {addr}, no. of concurrent clients: {con_clients}")
                     try:
                         while True:
-                            cmd, err = Server.__readCommand(conn)
+                            cmds, err = Server.__readCommands(conn)
                             if err is not None:
                                 logger.error(f"Error reading from {addr}: {err}")
                                 break
-                            if not cmd:
+                            if not cmds:
                                 logger.info(f"Client {addr} closed connection")
                                 break
-                            logger.debug(f"Received command from {addr}: {cmd.cmd} {cmd.args}")
-                            Server.__respond(cmd, conn)
+                            logger.debug(f"Received {len(cmds)} commands from {addr}")
+                            Server.__respond(cmds, conn)
                             
                     finally:
                         conn.close()

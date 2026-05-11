@@ -83,6 +83,16 @@ OK
 (integer) 9
 ```
 
+### Pipelining
+
+**runDB** supports Redis pipelining, allowing you to send multiple commands in a single request. You can test this using `netcat` (or `nc`):
+
+```bash
+(printf '*1\r\n$4\r\nPING\r\n*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n*2\r\n$3\r\nGET\r\n$1\r\nk\r\n';) | nc localhost 7379
+```
+
+This will send `PING`, `SET k v`, and `GET k` in one go and return the results for all three commands.
+
 ## Configuration
 
 Modify `config.py` to adjust system limits:

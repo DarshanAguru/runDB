@@ -84,27 +84,34 @@ class RESPProcessor:
         else:
             return None, 0, Exception("Invalid Data")
 
-    # Public method to decode raw RESP data
+    # Public method to decode raw RESP data, supporting pipelining (multiple RESP objects)
     @staticmethod
-    def decode(data: bytes) -> tuple[Any, Exception | None]:
+    def decode(data: bytes) -> tuple[list[Any] | None, Exception | None]:
         if len(data) == 0:
             return None, Exception("No Data")
-        
-        val, _, err = RESPProcessor.__decodeOne(data)
-        return val, err
+        idx = 0
+        vals = []
+        while idx < len(data):
+            val, delta, err = RESPProcessor.__decodeOne(data[idx:])
+            if err is not None:
+                return None, err
+            idx += delta
+            vals.append(val)
+        return vals, None
     
-    # Helper to decode a RESP array specifically as a list of strings (for commands)
+    # Helper to decode a single RESP array specifically as a list of strings (for commands)
     @staticmethod
     def decodeArrayString(data: bytes) -> tuple[list[str] | None, Exception | None]:
         try:
-            val, err = RESPProcessor.decode(data)
+            # Parse only the first RESP object from the bytes
+            val, _, err = RESPProcessor.__decodeOne(data)
             if err is not None:
                 return None, err
             if not isinstance(val, list):
                 return None, Exception("Expected Array Input")
-            tokens: list[str] = []
-            for ele in val:
-                tokens.append(str(ele))
+            
+            # Convert all elements to strings (standard for Redis commands)
+            tokens: list[str] = [str(ele) for ele in val]
             return tokens, None
         except Exception as err:
             return None, err
