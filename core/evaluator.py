@@ -1,23 +1,27 @@
 from typing import Protocol, List, Any
 from .RedisCmd import RedisCmd
 import time
-from .store import Value, Store
+from .store import Store
 from multiprocessing import Process
+from .redisObject import RedisObject, REDIS_OBJECT_ENCODINGS, REDIS_OBJECT_TYPES
+from .assertions import RedisAssertions
+from .encoding import Encoder
 
 class SupportsSend(Protocol):
     def send(self, data: bytes) -> int:
         ...
 
-# RESP Constants
-RESP_MINUS_TWO = b":-2\r\n"
-RESP_MINUS_ONE = b":-1\r\n"
-RESP_NIL = b"$-1\r\n"
-RESP_OK = b"+OK\r\n"
-RESP_ZERO = b":0\r\n"
-RESP_ONE = b":1\r\n"
+# Standard RESP responses
+class RESP_RESPONSES:
+    RESP_MINUS_TWO: bytes = b":-2\r\n"
+    RESP_MINUS_ONE: bytes = b":-1\r\n"
+    RESP_NIL: bytes = b"$-1\r\n"
+    RESP_OK: bytes = b"+OK\r\n"
+    RESP_ZERO: bytes = b":0\r\n"
+    RESP_ONE: bytes = b":1\r\n"
 
 class Evaluator:
-    # Main entry point to evaluate a list of commands and send a single response (pipelining)
+    # Main entry point to evaluate commands and send pipelined responses
     @staticmethod
     def evalAndRespond(cmds: list[RedisCmd], conn: SupportsSend) -> Exception | None:
         buffer = bytearray()
@@ -36,6 +40,8 @@ class Evaluator:
                 res = Evaluator.__evalEXPIRE(cmd.args)
             elif cmd.cmd == "BGREWRITEAOF":
                 res = Evaluator.__evalBGREWRITEAOF(cmd.args)
+            elif cmd.cmd == "INCR":
+                res = Evaluator.__evalINCR(cmd.args)
             else:
                 res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
             
@@ -51,7 +57,7 @@ class Evaluator:
     def __getErrorResponse(msg: str) -> bytes:
         return f"-{msg}\r\n".encode("utf-8")
 
-    # Handles the SET command with optional EX (expiration in seconds)
+    # Handles SET command with optional EX duration
     @staticmethod
     def __evalSET(args: List[str]) -> bytes:
         if len(args) <= 1:
@@ -59,6 +65,7 @@ class Evaluator:
 
         ex_duration_ms = -1
         key, value = args[0], args[1]
+        o_type, o_encoding = Encoder.deduceTypeEncoding(value)
 
         i = 2
         while i < len(args):
@@ -76,10 +83,10 @@ class Evaluator:
                 return Evaluator.__getErrorResponse("ERR syntax error")
             i += 1
 
-        Store.put(key, Value(value, ex_duration_ms))
-        return RESP_OK
+        Store.put(key, RedisObject(value, ex_duration_ms, o_type, o_encoding))
+        return RESP_RESPONSES.RESP_OK
 
-    # Handles the GET command, checking for existence and expiration
+    # Handles GET command with expiration check
     @staticmethod
     def __evalGET(args: List[str]) -> bytes:
         if len(args) != 1:
@@ -89,11 +96,11 @@ class Evaluator:
         val = Store.get(key)
 
         if val is None or val.isExpired():
-            return RESP_NIL
+            return RESP_RESPONSES.RESP_NIL
         
-        return Evaluator.encode(val.getValue(), bulk=True)
+        return Encoder.encode(val.getValue(), bulk=True)
     
-    # Returns the remaining Time To Live in seconds for a key
+    # Returns remaining TTL for a key
     @staticmethod
     def __evalTTL(args: List[str]) -> bytes:
         if len(args) != 1:
@@ -103,27 +110,27 @@ class Evaluator:
         val = Store.get(key)
         
         if val is None:
-            return RESP_MINUS_TWO
+            return RESP_RESPONSES.RESP_MINUS_TWO
     
         if val.getExpiresAt() == -1:
-            return RESP_MINUS_ONE
+            return RESP_RESPONSES.RESP_MINUS_ONE
     
         if val.isExpired():
-            return RESP_MINUS_TWO
+            return RESP_RESPONSES.RESP_MINUS_TWO
 
         duration_ms = val.getExpiresAt() - time.time() * 1000
-        return Evaluator.encode(int(duration_ms // 1000))
+        return Encoder.encode(int(duration_ms // 1000))
     
-    # Deletes one or more keys and returns the count of deleted keys
+    # Deletes keys and returns count of deleted items
     @staticmethod
     def __evalDEL(args: List[str]) -> bytes:
         count_deleted = 0
         for key in args:
             if Store.delete(key):
                 count_deleted += 1
-        return Evaluator.encode(count_deleted)
+        return Encoder.encode(count_deleted)
     
-    # Sets or updates the expiration of an existing key
+    # Sets expiration for an existing key
     @staticmethod
     def __evalEXPIRE(args: List[str]) -> bytes:
         if len(args) <= 1:
@@ -137,22 +144,20 @@ class Evaluator:
         
         val = Store.get(key)
         if val is None:
-            return RESP_ZERO
+            return RESP_RESPONSES.RESP_ZERO
         
         val.setExpiresAt(ex_duration_sec * 1000)
-        return RESP_ONE
+        return RESP_RESPONSES.RESP_ONE
     
-    # Background rewrite of the AOF file using forking
+    # Background rewrite of the AOF file
     @staticmethod
     def __evalBGREWRITEAOF(args: List[str]) -> bytes:
-        #importing inside function to avoid circular import
         from .aof import AOF
-        # This is called in a separate process to avoid blocking the main event loop
         process = Process(target = AOF.dumpAllAOF)
         process.start()
-        return RESP_OK
+        return RESP_RESPONSES.RESP_OK
 
-    # Simple PING/PONG for connectivity checks
+    # Connectivity check
     @staticmethod
     def __evalPING(args: List[str]) -> bytes:
         if len(args) >= 2:
@@ -161,22 +166,32 @@ class Evaluator:
         if len(args) == 0:
             return b"+PONG\r\n"
         else:
-            return Evaluator.encode(args[0], bulk=True)
-    
-    # Encodes data into RESP format based on type and flags
+            return Encoder.encode(args[0], bulk=True)
+
+    # Increments the integer value of a key
     @staticmethod
-    def encode(val: Any, bulk: bool = False) -> bytes:
-        if isinstance(val, int):
-            return f":{val}\r\n".encode("utf-8")
+    def __evalINCR(args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'incr' command")
         
-        if isinstance(val, list):
-            res = b"*" + str(len(val)).encode("utf-8") + b"\r\n"
-            for item in val:
-                # Array elements are encoded as bulk strings by default for commands
-                res += Evaluator.encode(item, bulk=True)
-            return res
+        key = args[0]
+        val = Store.get(key)
+
+        if val is None:
+            Store.put(key, RedisObject("1", -1, REDIS_OBJECT_TYPES.TYPE_STRING, REDIS_OBJECT_ENCODINGS.INT))
+            return Encoder.encode(1)
         
-        if bulk:
-            return f"${len(val)}\r\n{val}\r\n".encode("utf-8")
-        else:
-            return f"+{val}\r\n".encode("utf-8")
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+        
+        if not RedisAssertions.assertObjectEncoding(val.getEncoding(), REDIS_OBJECT_ENCODINGS.INT):
+            return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
+        
+        try:
+            i = int(val.getValue())
+            i += 1
+            val.val = str(i)
+            Store.put(key, val)
+            return Encoder.encode(i)
+        except (ValueError, TypeError):
+            return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")

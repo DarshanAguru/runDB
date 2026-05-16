@@ -13,6 +13,7 @@ This project was built to gain hands-on experience with:
 - **Snapshotting**: Implementing point-in-time data dumps using Append Only Files (AOF).
 - **Background Maintenance**: Learning how to use process forking for non-blocking maintenance tasks like AOF rewriting/dumping.
 - **Data Eviction & Expiration**: Learning how Redis manages memory and cleans up stale keys using active and passive strategies.
+- **Memory Optimization**: Using Python `__slots__` and bit-packing (packing type/encoding into a single byte) to minimize memory overhead per object.
 - **Concurrency**: Handling multiple connections in an asynchronous event loop environment.
 
 ## Features
@@ -22,7 +23,9 @@ This project was built to gain hands-on experience with:
 - **AOF Snapshotting**: Manually triggerable point-in-time state dumps to an AOF file.
 - **Background Forking**: Non-blocking AOF dumping using `multiprocessing` forking.
 - **Pipelining**: Support for batching multiple commands in a single network request.
-- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, and `BGREWRITEAOF`.
+- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, and `BGREWRITEAOF`.
+- **Memory Optimized**: Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently.
+- **Type Awareness**: Automatically deduces and stores object types (`STRING`) and encodings (`INT`, `EMBSTR`, `RAW`).
 - **Key Expiration**: Passive and active expiration strategies to clean up stale data.
 - **Eviction Policy**: Simple eviction mechanism to maintain a memory limit.
 
@@ -31,12 +34,15 @@ This project was built to gain hands-on experience with:
 The project is structured into modular components:
 
 - **`core/`**:
-    - `resp.py`: Implementation of RESP protocol for decoding requests and encoding responses.
-    - `evaluator.py`: The command processor that handles the logic for each supported operation.
+    - `resp.py`: Implementation of RESP protocol for decoding requests.
+    - `encoding.py`: RESP encoding logic and type/encoding deduction.
+    - `evaluator.py`: The command processor that handles operation logic.
+    - `redisObject.py`: Memory-optimized object representation using `__slots__` and bit-packing.
+    - `assertions.py`: Shared validation logic for Redis object types and encodings.
     - `aof.py`: Manages point-in-time state dumps using background child processes.
     - `store.py`: In-memory storage for key-value pairs and metadata.
-    - `expiration.py`: Manages active expiration sampling to delete keys that have timed out.
-    - `eviction.py`: Implements a basic eviction policy when the `KEY_LIMIT` is reached.
+    - `expiration.py`: Manages active expiration sampling.
+    - `eviction.py`: Implements a basic eviction policy.
     - `RedisCmd.py`: Data structure representing a parsed Redis command.
     - `FDComm.py`: Helper for non-blocking file descriptor communication.
 
@@ -72,8 +78,10 @@ Once connected, you can try various commands:
 ```text
 127.0.0.1:7379> PING
 PONG
-127.0.0.1:7379> SET mykey "hello world"
+127.0.0.1:7379> SET mykey 100
 OK
+127.0.0.1:7379> INCR mykey
+(integer) 101
 127.0.0.1:7379> BGREWRITEAOF
 OK
 ```
@@ -108,6 +116,7 @@ Modify `config.py` to adjust system limits:
 | `DEL key [key ...]` | Deletes one or more keys. |
 | `EXPIRE key seconds` | Sets a timeout on a key in seconds. |
 | `TTL key` | Returns the remaining time-to-live of a key. |
+| `INCR key` | Increments the integer value of a key by one. |
 | `BGREWRITEAOF` | Triggers a background process to dump current state to AOF file. |
 
 ## License
