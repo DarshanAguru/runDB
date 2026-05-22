@@ -14,7 +14,7 @@ class Expiration:
                 if v.isExpired():
                     Store.delete(k)
                     expire_count += 1
-            if limit == 0:
+            if limit < 0:
                 break
         
         return expire_count / 20.0

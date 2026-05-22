@@ -9,6 +9,8 @@ class Encoder:
             return f":{val}\r\n".encode("utf-8")
         
         if isinstance(val, list):
+            if len(val) == 0:
+                return b"+(empty array)\r\n"
             res = b"*" + str(len(val)).encode("utf-8") + b"\r\n"
             for item in val:
                 # Array elements are encoded as bulk strings by default for commands

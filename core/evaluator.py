@@ -6,6 +6,7 @@ from multiprocessing import Process
 from .redisObject import RedisObject, REDIS_OBJECT_ENCODINGS, REDIS_OBJECT_TYPES
 from .assertions import RedisAssertions
 from .encoding import Encoder
+from .stats import Stats
 
 class SupportsSend(Protocol):
     def send(self, data: bytes) -> int:
@@ -42,6 +43,12 @@ class Evaluator:
                 res = Evaluator.__evalBGREWRITEAOF(cmd.args)
             elif cmd.cmd == "INCR":
                 res = Evaluator.__evalINCR(cmd.args)
+            elif cmd.cmd == "INFO":
+                res = Evaluator.__evalINFO(cmd.args)
+            elif cmd.cmd == "CLIENT":
+                res = Evaluator.__evalCLIENT(cmd.args)
+            elif cmd.cmd == "LATENCY":
+                res = Evaluator.__evalLATENCY(cmd.args)
             else:
                 res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
             
@@ -195,3 +202,29 @@ class Evaluator:
             return Encoder.encode(i)
         except (ValueError, TypeError):
             return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
+    
+    # Evaluates the INFO command to report keyspace metrics
+    # TODO: Add more details as we grow ;)
+    @staticmethod
+    def __evalINFO(args: List[str]) -> bytes:
+        info_str = "# Keyspace\r\n"
+        for i in range(len(Stats.KeyspaceStat)):
+            info_str += f"db{i}:keys={Stats.getDBstat(i, 'keys')},expires=0,avg_ttl=0\r\n"
+        
+        return Encoder.encode(info_str, bulk=True)
+    
+    # TODO: Provides info about client based on what is asked for
+    @staticmethod
+    def __evalCLIENT(args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'client' command")
+        
+        return RESP_RESPONSES.RESP_OK
+    
+    # TODO: Provides info related to latency.
+    @staticmethod
+    def __evalLATENCY(args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'latency' command")
+        
+        return Encoder.encode([])
