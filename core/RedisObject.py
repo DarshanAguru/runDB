@@ -21,13 +21,17 @@ class RedisObject:
         self.expire_at = -1
 
         # Approximation LRU with last seen 24 bits from time in seconds
-        self.lru = (int(time.time()) & 0x00FFFFFF)
+        # Storing Last Accessed at Time (LAT)
+        self.lat = (int(time.time()) & 0x00FFFFFF)
         
         # Pack type (high 4 bits) and encoding (low 4 bits) into a single byte
         self.typeEncoding = ((o_type & 0x0F) << 4) | (o_encoding & 0x0F)
         
         if ex_duration_sec > 0:
             self.expire_at = int(time.time()) +  ex_duration_sec
+    
+    def updateLAT(self) -> None:
+        self.lat = (int(time.time()) & 0x00FFFFFF)
     
     def getType(self) -> int:
         return (self.typeEncoding >> 4) & 0x0F

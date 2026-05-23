@@ -25,8 +25,9 @@ class Store:
         if val is None:
             return None
         if val.isExpired():
-            cls.store.pop(key)
+            cls.delete(key)
             return None
+        val.updateLAT()
         return val
 
     # Deletes a key from the store also decrements keys count in Stats.
