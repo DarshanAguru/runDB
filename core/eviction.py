@@ -1,5 +1,5 @@
 import logging
-from .store import Store
+from .Store import Store
 from config import Config
 import random
 

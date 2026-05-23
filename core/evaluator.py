@@ -1,12 +1,12 @@
 from typing import Protocol, List, Any
 from .RedisCmd import RedisCmd
 import time
-from .store import Store
+from .Store import Store
 from multiprocessing import Process
-from .redisObject import RedisObject, REDIS_OBJECT_ENCODINGS, REDIS_OBJECT_TYPES
+from .RedisObject import RedisObject, REDIS_OBJECT_ENCODINGS, REDIS_OBJECT_TYPES
 from .assertions import RedisAssertions
 from .encoding import Encoder
-from .stats import Stats
+from .Stats import Stats
 
 class SupportsSend(Protocol):
     def send(self, data: bytes) -> int:

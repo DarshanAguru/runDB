@@ -1,5 +1,5 @@
 from typing import Any
-from .redisObject import REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
+from .RedisObject import REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
 
 class Encoder:
     # Encodes data into RESP format based on type and flags

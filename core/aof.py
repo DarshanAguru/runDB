@@ -2,8 +2,8 @@ import logging
 import io
 import os
 from config import Config
-from .store import Store
-from .redisObject import RedisObject
+from .Store import Store
+from .RedisObject import RedisObject
 from .encoding import Encoder
 
 logger = logging.getLogger(__name__)

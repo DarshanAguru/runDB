@@ -1,7 +1,7 @@
 from typing import Dict
 from config import Config
-from .redisObject import RedisObject
-from .stats import Stats
+from .RedisObject import RedisObject
+from .Stats import Stats
 
 # In-memory dictionary-based storage with eviction and lazy-deletion support
 class Store:
