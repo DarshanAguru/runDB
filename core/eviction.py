@@ -11,36 +11,37 @@ class Eviction:
     @staticmethod
     def evict() -> None:
         if Config.EVICTION_STRATEGY == "simple-first":
-            Eviction.__evictFirst()
+            Eviction.__evictRandomOne()
         elif Config.EVICTION_STRATEGY == "allkeys-random":
             Eviction.__evictAllkeysRandom()
         else:
             logger.error(f"Invalid eviction strategy: {Config.EVICTION_STRATEGY}")
     
-    # Evicts the first key-value pair from the store
+    # Evicts one random key-value pair from the store
     @staticmethod
-    def __evictFirst():
-        keys = list(Store.store.keys())
-        # random.shuffle because python doesnt randomise the dict key retrieval
-        # to make it truely random we need to shuffle the keys in random order 
-        # and then perform deletion
-        random.shuffle(keys)
-        for key in keys:
-            Store.delete(key)
-            break
+    def __evictRandomOne():
+        if not Store.store:
+            return
+        # Since python preserve order of insertion in dict
+        # retrieval isn't random.
+        # So random.choice : to get a random key from keys list
+        # and then we can evict it.
+        key = random.choice(list(Store.store.keys()))
+        Store.delete(key)
     
     # Evicts random (EVICTION_RATIO %) keys from the store
     @staticmethod
     def __evictAllkeysRandom():
+        if not Store.store:
+            return
         # No of keys tobe evicted
         evictKeys = int(Config.EVICTION_RATIO * float(Config.KEY_LIMIT))
-        keys = list(Store.store.keys())
-        # random.shuffle -- explaination given at line 23 in "__evictFirst()" method :)
-        random.shuffle(keys)
+        # Since python preserve order of insertion in dict
+        # retrieval isn't random.
+        # So random.sample : to get a random keys list from dict keys list
+        # and then we can evict it.
+        keys = random.sample(list(Store.store.keys()), evictKeys)
         for key in keys:
             Store.delete(key)
-            evictKeys -= 1
-            if evictKeys <= 0:
-                break
     
     
