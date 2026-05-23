@@ -14,15 +14,20 @@ class REDIS_OBJECT_ENCODINGS:
 # Represents a stored Redis value with metadata (expiration, type, encoding)
 class RedisObject:
     # Use slots to minimize memory overhead per object
-    __slots__ = ["val", "expire_at", "typeEncoding"]
+    __slots__ = ["val", "expire_at", "typeEncoding", "lru"]
 
-    def __init__(self, val: Any, ex_duration_ms: int, o_type: int, o_encoding: int) -> None:
+    def __init__(self, val: Any, ex_duration_sec: int, o_type: int, o_encoding: int) -> None:
         self.val = val
         self.expire_at = -1
+
+        # Approximation LRU with last seen 24 bits from time in seconds
+        self.lru = (int(time.time()) & 0x00FFFFFF)
+        
         # Pack type (high 4 bits) and encoding (low 4 bits) into a single byte
         self.typeEncoding = ((o_type & 0x0F) << 4) | (o_encoding & 0x0F)
-        if ex_duration_ms > 0:
-            self.expire_at = int(time.time() * 1000) + ex_duration_ms
+        
+        if ex_duration_sec > 0:
+            self.expire_at = int(time.time()) +  ex_duration_sec
     
     def getType(self) -> int:
         return (self.typeEncoding >> 4) & 0x0F
@@ -33,8 +38,8 @@ class RedisObject:
     def getExpiresAt(self) -> int:
         return self.expire_at
 
-    def setExpiresAt(self, ex_duration_ms: int) -> None:
-        self.expire_at = int(time.time() * 1000) + ex_duration_ms
+    def setExpiresAt(self, ex_duration_sec: int) -> None:
+        self.expire_at = int(time.time()) + ex_duration_sec
     
     def getValue(self) -> Any:
         return self.val
@@ -43,4 +48,4 @@ class RedisObject:
     def isExpired(self) -> bool:
         if self.expire_at == -1:
             return False    
-        return self.expire_at <= time.time() * 1000
+        return self.expire_at <= int(time.time())

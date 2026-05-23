@@ -83,14 +83,13 @@ class Evaluator:
                     return Evaluator.__getErrorResponse("ERR syntax error")
                 try:
                     ex_duration_sec = int(args[i])
-                    ex_duration_ms = ex_duration_sec * 1000
                 except Exception:
                     return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
             else:
                 return Evaluator.__getErrorResponse("ERR syntax error")
             i += 1
 
-        Store.put(key, RedisObject(value, ex_duration_ms, o_type, o_encoding))
+        Store.put(key, RedisObject(value, ex_duration_sec, o_type, o_encoding))
         return RESP_RESPONSES.RESP_OK
 
     # Handles GET command with expiration check
@@ -125,8 +124,8 @@ class Evaluator:
         if val.isExpired():
             return RESP_RESPONSES.RESP_MINUS_TWO
 
-        duration_ms = val.getExpiresAt() - time.time() * 1000
-        return Encoder.encode(int(duration_ms // 1000))
+        duration_sec = val.getExpiresAt() - int(time.time())
+        return Encoder.encode(duration_sec)
     
     # Deletes keys and returns count of deleted items
     @staticmethod
@@ -153,7 +152,7 @@ class Evaluator:
         if val is None:
             return RESP_RESPONSES.RESP_ZERO
         
-        val.setExpiresAt(ex_duration_sec * 1000)
+        val.setExpiresAt(ex_duration_sec)
         return RESP_RESPONSES.RESP_ONE
     
     # Background rewrite of the AOF file
