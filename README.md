@@ -30,7 +30,8 @@ This project was built to gain hands-on experience with:
 - **Key Expiration**: Passive (lazy) deletion on access and active expiration strategies (random sampling) to clean up stale data.
 - **Eviction Policies**: Memory reclamation strategies to maintain a hard keys limit:
   - `simple-first`: Evicts a single random key when the memory limit is reached.
-  - `allkeys-random`: Evicts a configurable ratio (e.g., 25%) of random keys in the database using high-performance sample selection.
+  - `allkeys-random`: Evicts a configurable ratio (e.g., 20%) of random keys in the database using high-performance sample selection.
+  - `allkeys-lru`: Approximated Least Recently Used eviction strategy utilizing a globally managed, sorted eviction pool similar to Redis.
 
 ## Core Optimizations & Architecture
 
@@ -38,7 +39,7 @@ This project was built to gain hands-on experience with:
 
 To minimize the memory footprint of storing millions of keys in-memory, `runDB` employs custom optimization techniques:
 
-- **`__slots__` in `RedisObject`**: By defining `__slots__ = ["val", "expire_at", "typeEncoding"]` inside our core object wrapper, we disable the automatic creation of dynamic instance dictionaries (`__dict__`) and weak references (`__weakref__`). This reduces memory consumption by **~60%** per object.
+- **`__slots__` in `RedisObject`**: By defining `__slots__ = ["val", "expire_at", "typeEncoding", "lat"]` inside our core object wrapper, we disable the automatic creation of dynamic instance dictionaries (`__dict__`) and weak references (`__weakref__`). This reduces memory consumption by **~60%** per object.
 - **Bit-Packed Type/Encoding**: Instead of storing the object type and encoding as separate integer attributes (which consume 28 bytes each in Python), they are bit-packed into a single 8-bit integer field (`typeEncoding`).
   - High 4 bits: Redis Object Type (e.g., `TYPE_STRING = 0`)
   - Low 4 bits: Redis Object Encoding (e.g., `RAW = 0`, `INT = 1`, `EMBSTR = 8`)
@@ -50,6 +51,7 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
 - `runDB` solves this with ultra-fast sampling methods:
   - For `simple-first`, it uses `random.choice(list(store.keys()))` to instantly locate and evict a single random key.
   - For `allkeys-random`, it uses `random.sample(list(store.keys()), evict_keys_count)` to retrieve a specific sub-sample of keys to evict in a single pass, avoiding the CPU bottleneck of shuffling the entire keyspace.
+  - For `allkeys-lru`, it employs an **Approximated LRU Eviction Pool** of size 16 (or custom size) sorted by key idle times ascending. It samples keys dynamically, inserts them into the sorted pool by comparing with the worst candidate (index 0), and evicts from the pool's end (maximum idle time).
 
 ### 3. Active Expiration Loop
 
@@ -78,7 +80,7 @@ The project is structured into modular components:
   - `aof.py`: Manages point-in-time state dumps using background child processes.
   - `store.py`: In-memory storage for key-value pairs and metadata.
   - `expiration.py`: Manages active expiration sampling.
-  - `eviction.py`: Implements memory-reclamation strategies (`simple-first`, `allkeys-random`).
+  - `eviction.py`: Implements memory-reclamation strategies (`simple-first`, `allkeys-random`, `allkeys-lru`).
   - `stats.py`: Tracks and manages keyspace statistics across multiple Redis databases.
   - `RedisCmd.py`: Data structure representing a parsed Redis command.
   - `FDComm.py`: Helper for non-blocking file descriptor communication.
@@ -143,16 +145,18 @@ OK
 
 Modify `config.py` to adjust system limits:
 
-| Parameter             | Default            | Description                                                            |
-| --------------------- | ------------------ | ---------------------------------------------------------------------- |
-| `HOST`              | `0.0.0.0`        | Binding address                                                        |
-| `PORT`              | `7379`           | Listening port                                                         |
-| `KEY_LIMIT`         | `100`            | Maximum number of keys allowed in the store                            |
-| `MAX_CLIENTS`       | `10,000`         | Maximum number of concurrent client connections                        |
-| `AOF_FILE`          | `run-master.aof` | Filename used for AOF persistence dumping                              |
-| `EVICTION_STRATEGY` | `allkeys-random` | Strategy for memory reclamation (`simple-first`, `allkeys-random`) |
-| `EVICTION_RATIO`    | `0.25`           | Fraction of keys evicted during `allkeys-random` eviction            |
-| `DB_COUNT`          | `4`              | Number of databases configured in the server                           |
+| Parameter              | Default          | Description                                                            |
+| ---------------------- | ---------------- | ---------------------------------------------------------------------- |
+| `HOST`                 | `0.0.0.0`        | Binding address                                                        |
+| `PORT`                 | `7379`           | Listening port                                                         |
+| `KEY_LIMIT`            | `100`            | Maximum number of keys allowed in the store                            |
+| `MAX_CLIENTS`          | `10,000`         | Maximum number of concurrent client connections                        |
+| `AOF_FILE`             | `run-master.aof` | Filename used for AOF persistence dumping                              |
+| `EVICTION_STRATEGY`    | `allkeys-lru`    | Strategy for memory reclamation (`simple-first`, `allkeys-random`, `allkeys-lru`) |
+| `EVICTION_RATIO`       | `0.2`            | Fraction of keys evicted during eviction                               |
+| `EVICTION_POOL_SIZE`   | `16`             | Candidate pool size for `allkeys-lru` eviction strategy                |
+| `EVICTION_SAMPLE_SIZE` | `5`              | Number of keys sampled on each pass to populate eviction pool          |
+| `DB_COUNT`             | `4`              | Number of databases configured in the server                           |
 
 ---
 

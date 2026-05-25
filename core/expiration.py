@@ -1,20 +1,38 @@
+import logging
+import random
 from .Store import Store
+
+logger = logging.getLogger(__name__)
 
 class Expiration:
     
     # Samples a subset of keys and deletes those that have expired
     @staticmethod
-    def expireSamples() -> float:
+    def __expireSamples() -> float:
         limit = 20
         expire_count = 0
-
-        for k, v in Store.store.items():
-            if v.getExpiresAt() != -1:
-                limit -= 1
-                if v.isExpired():
-                    Store.delete(k)
-                    expire_count += 1
-            if limit < 0:
-                break
         
-        return expire_count / 20.0
+        if not Store.store:
+            return 0.0
+
+        # Sample keys first to avoid RuntimeError: dictionary changed size during iteration
+        sampled_keys = random.sample(list(Store.store.keys()), min(limit, len(Store.store)))
+        for k in sampled_keys:
+            v = Store.store.get(k)
+            if v is None:
+                continue
+            if Store.hasExpired(v):
+                Store.delete(k)
+                expire_count += 1
+
+        return expire_count / len(sampled_keys)
+    
+    # Periodically samples and deletes expired keys from the store
+    @staticmethod
+    def deleteExpiredKeys() -> None:
+        frac = Expiration.__expireSamples()
+        while frac > 0.25:
+            frac = Expiration.__expireSamples()
+        
+        # Logging the number of deleted keys
+        logger.debug(f"Deleted {int(frac * min(20, len(Store.store)))} the expired but undeleted keys.")

@@ -60,21 +60,13 @@ class Server:
         if err is not None:
             Server.__respondError(err, con)
 
-    # Periodically samples and deletes expired keys from the store
-    @staticmethod
-    def __deleteExpiredKeys() -> None:
-        frac = Expiration.expireSamples()
-        while frac > 0.25:
-            frac = Expiration.expireSamples()
-        logger.debug(f"Frac: {frac}")
-        logger.debug(f"Deleted the expired but undeleted keys. total keys: {len(Store.store)}")
 
     # Main loop for the high-concurrency asynchronous server using epoll
     @staticmethod
     def runAsyncTcpServer(host: str, port: int) -> None:
         logger.info("Starting the Asynchronous TCP Server")
         con_clients = 0
-        cron_freq_sec = 1
+        cron_freq_sec = Config.CRON_FREQ_INTERVAL
         last_cron_exec_time_sec = time.time()
         clients: dict[int, socket.socket] = {}
 
@@ -96,7 +88,10 @@ class Server:
                         
                         # Background task to clean up expired keys
                         if time.time() - last_cron_exec_time_sec >= cron_freq_sec:
-                            Server.__deleteExpiredKeys()
+                            # Delete Expired Keys periodically
+                            Expiration.deleteExpiredKeys()
+                            
+                            # Update the last checked cycle
                             last_cron_exec_time_sec = time.time()
 
                         # Wait for I/O events (blocks until an event occurs)

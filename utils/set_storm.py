@@ -7,7 +7,7 @@ import subprocess
 #STORM THE DB WITH SET COMMANDS
 
 # Dynamic path resolution to safely import Config when run directly
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from config import Config
 
 def setStorm():

@@ -70,7 +70,7 @@ class Evaluator:
         if len(args) <= 1:
             return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'set' command")
 
-        ex_duration_ms = -1
+        ex_duration_sec = -1
         key, value = args[0], args[1]
         o_type, o_encoding = Encoder.deduceTypeEncoding(value)
 
@@ -89,7 +89,7 @@ class Evaluator:
                 return Evaluator.__getErrorResponse("ERR syntax error")
             i += 1
 
-        Store.put(key, RedisObject(value, ex_duration_sec, o_type, o_encoding))
+        Store.put(key, RedisObject(value, o_type, o_encoding), ex_duration_sec)
         return RESP_RESPONSES.RESP_OK
 
     # Handles GET command with expiration check
@@ -101,7 +101,10 @@ class Evaluator:
         key = args[0]
         val = Store.get(key)
 
-        if val is None or val.isExpired():
+        if val is None:
+            return RESP_RESPONSES.RESP_NIL
+        
+        if Store.hasExpired(val):
             return RESP_RESPONSES.RESP_NIL
         
         return Encoder.encode(val.getValue(), bulk=True)
@@ -118,13 +121,13 @@ class Evaluator:
         if val is None:
             return RESP_RESPONSES.RESP_MINUS_TWO
     
-        if val.getExpiresAt() == -1:
+        if Store.getExpiry(val) == -1:
             return RESP_RESPONSES.RESP_MINUS_ONE
     
-        if val.isExpired():
+        if Store.hasExpired(val):
             return RESP_RESPONSES.RESP_MINUS_TWO
 
-        duration_sec = val.getExpiresAt() - int(time.time())
+        duration_sec = Store.getExpiry(val) - int(time.time())
         return Encoder.encode(duration_sec)
     
     # Deletes keys and returns count of deleted items
@@ -152,7 +155,7 @@ class Evaluator:
         if val is None:
             return RESP_RESPONSES.RESP_ZERO
         
-        val.setExpiresAt(ex_duration_sec)
+        Store.setExpiry(val, ex_duration_sec)
         return RESP_RESPONSES.RESP_ONE
     
     # Background rewrite of the AOF file
@@ -184,7 +187,7 @@ class Evaluator:
         val = Store.get(key)
 
         if val is None:
-            Store.put(key, RedisObject("1", -1, REDIS_OBJECT_TYPES.TYPE_STRING, REDIS_OBJECT_ENCODINGS.INT))
+            Store.put(key, RedisObject("1", REDIS_OBJECT_TYPES.TYPE_STRING, REDIS_OBJECT_ENCODINGS.INT), -1)
             return Encoder.encode(1)
         
         if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
@@ -197,7 +200,8 @@ class Evaluator:
             i = int(val.getValue())
             i += 1
             val.val = str(i)
-            Store.put(key, val)
+            exp = Store.getExpiry(val)
+            Store.put(key, val, exp)
             return Encoder.encode(i)
         except (ValueError, TypeError):
             return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
