@@ -34,5 +34,8 @@ class Expiration:
         while frac > 0.25:
             frac = Expiration.__expireSamples()
         
-        # Logging the number of deleted keys
-        logger.debug(f"Deleted {int(frac * min(20, len(Store.store)))} the expired but undeleted keys.")
+        # Logging the number of deleted keys only if keys are deleted
+        # just for logging, no use for server logic, can be commented out.
+        val = int(frac * min(20, len(Store.store))) 
+        if val > 0:
+            logger.debug(f"Deleted {val} the expired but undeleted keys.")

@@ -3,6 +3,9 @@
 > [!NOTE]
 > **runDB** is a learning-focused project created to explore and understand Redis internals in simpler terms. It is intended for educational purposes and is not meant to be a production database replacement.
 
+> [!IMPORTANT]
+> **Linux-Only**: Since the high-concurrency asynchronous network engine is built using the Linux-specific `select.epoll` API, `runDB` is compatible with **Linux environments only**.
+
 A lightweight, simplified implementation of a Redis-like in-memory Key-Value store. It demonstrates core concepts such as the Redis Serialization Protocol (RESP), high-concurrency asynchronous networking with `epoll`, and internal memory-management strategies.
 
 ## Learning Objectives
@@ -94,7 +97,7 @@ The project is structured into modular components:
 ### Prerequisites
 
 - Python 3.8+
-- Linux (for `epoll` support)
+- **Linux OS**: Required because the event-loop relies on the Linux-specific `select.epoll` system call.
 
 ### Running the Server
 
