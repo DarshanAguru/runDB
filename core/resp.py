@@ -18,8 +18,10 @@ class RESPProcessor:
     @staticmethod
     def __readSimpleString(data: bytes) -> tuple[str, int, Exception | None]:
         pos = 1
-        while data[pos] != ord('\r'):
+        while pos < len(data) and data[pos] != ord('\r'):
             pos += 1
+        if pos >= len(data) or pos + 1 >= len(data) or data[pos+1] != ord('\n'):
+            raise IndexError("Incomplete simple string")
         return data[1:pos].decode("utf-8"), pos+2, None
     
     # Reads an error message starting with '-'
@@ -35,9 +37,11 @@ class RESPProcessor:
     def __readInteger(data: bytes) -> tuple[int, int, Exception | None]:
         pos = 1
         val = 0
-        while data[pos] != ord('\r'):
+        while pos < len(data) and data[pos] != ord('\r'):
             val = val * 10 + data[pos] - ord('0')
             pos+=1
+        if pos >= len(data) or pos + 1 >= len(data) or data[pos+1] != ord('\n'):
+            raise IndexError("Incomplete integer")
         return val, pos+2, None
     
     # Reads a bulk string starting with '$'
@@ -45,7 +49,13 @@ class RESPProcessor:
     def __readBulkString(data: bytes) -> tuple[str, int, Exception | None]:
         pos = 1
         length, delta = RESPProcessor.__readLength(data[pos:])
+        if delta == 0:
+            raise IndexError("Incomplete bulk string length")
         pos += delta
+        if len(data) < pos + length + 2:
+            raise IndexError("Incomplete bulk string payload")
+        if data[pos+length] != ord('\r') or data[pos+length+1] != ord('\n'):
+            raise IndexError("Incomplete bulk string termination")
         return data[pos: (pos + length)].decode("utf-8"), pos + length + 2, None
     
     # Reads a RESP array starting with '*'
@@ -53,11 +63,15 @@ class RESPProcessor:
     def __readArray(data: bytes) -> tuple[list[Any] | None, int, Exception | None]:
         pos = 1
         length, delta = RESPProcessor.__readLength(data[pos:])
+        if delta == 0:
+            raise IndexError("Incomplete array length")
         pos += delta
 
         arr: list[Any] = [None] * length
 
         for i in range(length):
+            if pos >= len(data):
+                raise IndexError("Incomplete array elements")
             ele, delta, err = RESPProcessor.__decodeOne(data[pos:])
             if err is not None:
                 return None, 0, err
@@ -84,20 +98,24 @@ class RESPProcessor:
         else:
             return None, 0, Exception("Invalid Data")
 
-    # Public method to decode raw RESP data, supporting pipelining (multiple RESP objects)
+    # Public method to decode raw RESP data, supporting partial parsing and pipelining
     @staticmethod
-    def decode(data: bytes) -> tuple[list[Any] | None, Exception | None]:
+    def decode(data: bytes) -> tuple[list[Any] | None, int, Exception | None]:
         if len(data) == 0:
-            return None, Exception("No Data")
+            return [], 0, None
         idx = 0
         vals = []
-        while idx < len(data):
-            val, delta, err = RESPProcessor.__decodeOne(data[idx:])
-            if err is not None:
-                return None, err
-            idx += delta
-            vals.append(val)
-        return vals, None
+        try:
+            while idx < len(data):
+                val, delta, err = RESPProcessor.__decodeOne(data[idx:])
+                if err is not None:
+                    return None, idx, err
+                idx += delta
+                vals.append(val)
+            return vals, idx, None
+        except IndexError:
+            # We hit incomplete data; return what was parsed so far and the consumed bytes
+            return vals, idx, None
     
     # Helper to decode a single RESP array specifically as a list of strings (for commands)
     @staticmethod
