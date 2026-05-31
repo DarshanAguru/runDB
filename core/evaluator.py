@@ -210,9 +210,19 @@ class Evaluator:
     # TODO: Add more details as we grow ;)
     @staticmethod
     def __evalINFO(args: List[str]) -> bytes:
+        from .internals.Malloc_internal import MemTracker
+        from config import Config
+
         info_str = "# Keyspace\r\n"
         for i in range(len(Stats.KeyspaceStat)):
             info_str += f"db{i}:keys={Stats.getDBstat(i, 'keys')},expires=0,avg_ttl=0\r\n"
+        
+        info_str += "# Memory\r\n"
+        stats = MemTracker.stats()
+        used_percentage = (stats['bytes'] / Config.MEMORY_LIMIT) * 100
+        info_str += f"used_memory:{stats['bytes']} ({used_percentage:.2f}%) \r\n"
+        info_str += f"max_memory:{Config.MEMORY_LIMIT}\r\n"
+        info_str += f"avaiable_memory:{Config.MEMORY_LIMIT - stats['bytes']} ({100 - used_percentage:.2f}%)\r\n"
         
         return Encoder.encode(info_str, bulk=True)
     

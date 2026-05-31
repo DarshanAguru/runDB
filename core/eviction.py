@@ -38,8 +38,8 @@ class Eviction:
     def __evictAllkeysRandom():
         if not Store.store:
             return
-        # No of keys tobe evicted
-        evictKeys = int(Config.EVICTION_RATIO * float(Config.KEY_LIMIT))
+        # Number of keys to be evicted is a percentage of current active keys (minimum 1 key)
+        evictKeys = max(1, int(Config.EVICTION_RATIO * len(Store.store)))
         # Since python preserve order of insertion in dict
         # retrieval isn't random.
         # So random.sample : to get a random keys list from dict keys list
@@ -56,14 +56,15 @@ class Eviction:
         # min(): For getting Keys without raising ValueError
         keys = random.sample(list(Store.store.keys()), min(count, len(Store.store)))
         for key in keys:
-            obj = Store.get(key)
+            obj = Store.store.get(key)
             if obj is not None:
                 # Add key and its last accessed timestamp (LAT) to the eviction pool
                 EvictPool.add(key, obj.getLAT())
     
     @staticmethod
     def __evictAllKeysLRU() -> None:
-        evictKeys = int(Config.EVICTION_RATIO * float(Config.KEY_LIMIT))
+        # Number of keys to be evicted is a percentage of current active keys (minimum 1 key)
+        evictKeys = max(1, int(Config.EVICTION_RATIO * len(Store.store)))
         i = 0
         while i < evictKeys:
             # If the eviction pool is empty, attempt to populate it with a new sample
@@ -79,7 +80,7 @@ class Eviction:
                 continue
             
             # Retrieve object from store to check for stale/already deleted pool entries
-            obj = Store.get(item.key)
+            obj = Store.store.get(item.key)
 
             # Skip if the key is stale (already deleted or expired)
             if obj is None:

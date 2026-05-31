@@ -3,6 +3,7 @@ from typing import Dict
 from config import Config
 from .RedisObject import RedisObject
 from .Stats import Stats
+from .internals.Malloc_internal import MemTracker
 
 # In-memory dictionary-based storage with eviction and lazy-deletion support
 class Store:
@@ -16,13 +17,20 @@ class Store:
     # also increments keys count in Stats
     @classmethod
     def put(cls, key: str, value: RedisObject, ex_duration_sec: int) -> None:
-        if (len(cls.store) >= Config.KEY_LIMIT):
+        # Trigger eviction while total allocated C-memory exceeds MEMORY_LIMIT and keys exist to evict
+        while len(cls.store) > 0 and MemTracker.allocated > Config.MEMORY_LIMIT:
             from .eviction import Eviction
             Eviction.evict()
+
         cls.store[key] = value
         if ex_duration_sec > 0:
             cls.setExpiry(value, ex_duration_sec)
         Stats.increment(0, "keys")
+
+        # After inserting, if we exceed the limit, evict immediately to maintain the invariant
+        while len(cls.store) > 0 and MemTracker.allocated > Config.MEMORY_LIMIT:
+            from .eviction import Eviction
+            Eviction.evict()
 
     # Retrieves an object; deletes and returns None if it has expired
     @classmethod
@@ -46,6 +54,10 @@ class Store:
         if val in cls.expires:
             cls.expires.pop(val)
         Stats.decrement(0, "keys")
+
+        # Explicitly free the C-allocated memory of the value immediately
+        if hasattr(val, "_val") and val._val is not None:
+            val.val = None  # Setting to None triggers the property setter which calls free()
         
         return True
     
@@ -60,4 +72,3 @@ class Store:
     @classmethod
     def getExpiry(cls, obj: RedisObject) -> int:
         return cls.expires.get(obj, -1)
-        
