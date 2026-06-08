@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--port", type=int, default=Config.PORT, help="Port for RunDB  │ number (default: %(default)s)")                                   
     args = parser.parse_args()
    
-    logger.info("🏃‍♂️ RunDB is starting to sprint! Let's burn some memory! 🔥")
+    logger.info("🏃 RunDB is starting to sprint! Let's burn some memory! 🔥")
     
     try:
         asyncio.run(main_async(args))

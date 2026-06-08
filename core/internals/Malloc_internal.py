@@ -1,8 +1,21 @@
 import ctypes 
 from ctypes import util
 import weakref
+import logging
 
-libc = ctypes.CDLL(util.find_library("c"))
+logger = logging.getLogger(__name__)
+
+libc = None
+
+# Attempt to load jemalloc from local dll directory
+try:
+    libc = ctypes.CDLL("./dll/libjemalloc.so")
+    logger.debug("Successfully loaded jemalloc from ./dll/libjemalloc.so for native allocations!")
+except OSError:
+    # Fallback to standard C library
+    # Note: if the server was started with LD_PRELOAD=./dll/libjemalloc.so,
+    # the standard libc malloc/free will transparently use jemalloc.
+    libc = ctypes.CDLL(util.find_library("c"))
 
 libc.malloc.argtypes = [ctypes.c_size_t]
 libc.malloc.restype = ctypes.c_void_p

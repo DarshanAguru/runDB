@@ -51,7 +51,7 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
   - High 4 bits: Redis Object Type (e.g., `TYPE_STRING = 0`)
   - Low 4 bits: Redis Object Encoding (e.g., `RAW = 0`, `INT = 1`, `EMBSTR = 8`)
   - Bit-packing formula: `((type & 0x0F) << 4) | (encoding & 0x0F)`
-- **Native C Allocation via `ctypes`**: To bypass Python's high object memory overhead and simulate actual C-level structures, `runDB` wraps system library memory allocations using `ctypes`. It directly binds to `libc.malloc()` and `libc.free()`, allowing manual C-level heap allocation and precise tracking of allocated bytes via `MemTracker`.
+- **Native C Allocation via `ctypes`**: To bypass Python's high object memory overhead and simulate actual C-level structures, `runDB` wraps system library memory allocations using `ctypes`. It directly binds to `libc.malloc()` and `libc.free()`, allowing manual C-level heap allocation and precise tracking of allocated bytes via `MemTracker`. Additionally, native allocations can be powered by `jemalloc` (located in the `./dll/` directory) by starting the server with preloading, ensuring low memory fragmentation just like real Redis.
 
 ### 2. High-Performance Eviction Strategy
 
@@ -127,10 +127,16 @@ The project is structured into modular components:
 
 ### Running the Server
 
-To start the runDB server with default settings:
+To start the runDB server with default settings (standard C allocator):
 
 ```bash
 python3 main.py
+```
+
+To start the server using the optimized `jemalloc` allocator:
+
+```bash
+LD_PRELOAD=./dll/libjemalloc.so python3 main.py
 ```
 
 ### Testing the Server
