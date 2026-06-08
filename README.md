@@ -8,6 +8,8 @@
 
 A lightweight, simplified implementation of a Redis-like in-memory Key-Value store. It demonstrates core concepts such as the Redis Serialization Protocol (RESP), high-concurrency asynchronous networking with `epoll`, and internal memory-management strategies.
 
+![runDB Architecture](runDB.png)
+
 ## Learning Objectives
 
 This project was built to gain hands-on experience with:
