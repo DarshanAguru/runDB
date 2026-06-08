@@ -32,3 +32,55 @@ class AOF:
             logger.info("AOF file rewrite complete (background)")
         except Exception as e:
             logger.error(f"Error in background AOF dump: {e}")
+
+    # Loads and restores database state from the AOF file
+    @staticmethod
+    def loadAllAOF() -> None:
+        if not os.path.exists(Config.AOF_FILE):
+            logger.info("No AOF file found. Starting with empty database.")
+            return
+
+        logger.info(f"Loading database from AOF file: {Config.AOF_FILE}")
+        try:
+            with open(Config.AOF_FILE, 'rb') as file:
+                data = file.read()
+
+            if not data:
+                logger.info("AOF file is empty.")
+                return
+
+            from .resp import RESPProcessor
+            from .RedisCmd import RedisCmd
+            from .evaluator import Evaluator
+
+            # Dummy connection to satisfy the evaluator's output interface
+            class DummyConnection:
+                def send(self, data: bytes) -> int:
+                    return len(data)
+
+            dummy_conn = DummyConnection()
+
+            vals, consumed, err = RESPProcessor.decode(data)
+            if err is not None and consumed == 0:
+                logger.error(f"Error parsing AOF file: {err}")
+                return
+
+            if vals:
+                cmds = []
+                for v in vals:
+                    if not isinstance(v, list) or len(v) == 0:
+                        continue
+                    cmds.append(RedisCmd(
+                        str(v[0]).upper(),
+                        [str(arg) for arg in v[1:]]
+                    ))
+
+                if cmds:
+                    eval_err = Evaluator.evalAndRespond(cmds, dummy_conn)
+                    if eval_err is not None:
+                        logger.error(f"Error restoring AOF commands: {eval_err}")
+                        return
+            
+            logger.info(f"Successfully loaded and executed {len(vals) if vals else 0} commands from AOF.")
+        except Exception as e:
+            logger.error(f"Error loading AOF file: {e}")

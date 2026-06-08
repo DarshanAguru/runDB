@@ -3,8 +3,10 @@ import socket
 import logging
 from typing import Protocol
 import time
+import errno
 from core import RESPProcessor, RedisCmd, Evaluator, FDComm, Store, Expiration
 from config import Config
+from .Shutdown import Shutdown
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,10 @@ class Server:
         clients: dict[int, socket.socket] = {}
         comms: dict[int, FDComm] = {}
 
+        # Restore database state from AOF log file if present
+        from core.aof import AOF
+        AOF.loadAllAOF()
+
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serverSock:
                 # Initialize TCP socket (IPv4, Streaming)
@@ -107,11 +113,11 @@ class Server:
                 
                 # Initialize epoll for event-driven I/O
                 epoll = select.epoll()
+                server_registered = True
                 try:
                     # Register server socket to listen for incoming connections
                     epoll.register(serverSock.fileno(), select.EPOLLIN)
                     while True:
-                        
                         # Background task to clean up expired keys
                         if time.time() - last_cron_exec_time_sec >= cron_freq_sec:
                             # Delete Expired Keys periodically
@@ -123,10 +129,18 @@ class Server:
                         # Wait for I/O events
                         # We poll for 1 second so as to not block the server for too long
                         # and can check on expired keys time to time
-                        events = epoll.poll(1)
+                        try:
+                            events = epoll.poll(1)
+                        except (InterruptedError, OSError) as poll_err:
+                            if isinstance(poll_err, OSError) and poll_err.errno != errno.EINTR:
+                                raise poll_err
+                            continue
+
                         for fd, event in events:
                             # Accept new connections
                             if fd == serverSock.fileno():
+                                if Shutdown.is_shutdown_requested:
+                                    continue
                                 try:
                                     sock, addr = serverSock.accept()
                                 except BlockingIOError:
@@ -195,6 +209,28 @@ class Server:
                                             epoll.modify(fd, select.EPOLLIN | select.EPOLLOUT)
                                         else:
                                             epoll.modify(fd, select.EPOLLIN)
+
+                        if Shutdown.is_shutdown_requested:
+                            if server_registered:
+                                logger.info("Shutdown requested. Stop accepting new client connections.")
+                                try:
+                                    epoll.unregister(serverSock.fileno())
+                                except OSError:
+                                    pass
+                                server_registered = False
+
+                            # Close any active client connections that have no pending reads/writes
+                            for fd in list(clients.keys()):
+                                comm = comms.get(fd)
+                                if comm is not None and not comm.hasPendingWrites() and len(comm.read_buffer) == 0:
+                                    logger.info(f"Closing idle client connection for fd: {fd}")
+                                    Server.__closeConnection(fd, clients, comms, epoll)
+                                    con_clients -= 1
+
+                            # If no clients are left, break the loop and finish shutdown
+                            if len(clients) == 0:
+                                logger.info("All client requests processed. Exiting server loop.")
+                                break
                 except OSError as err:
                     logger.error(f"Epoll error: {err}")
                 except KeyboardInterrupt:
@@ -203,5 +239,17 @@ class Server:
                     for sock in clients.values():
                         sock.close()
                     epoll.close()
+
+            if Shutdown.is_shutdown_requested:
+                logger.info("Initiating final AOF dump...")
+                from core.aof import AOF
+                import os
+                try:
+                    AOF.dumpAllAOF()
+                    aof_path = os.path.abspath(Config.AOF_FILE)
+                    logger.info("RunDB server shutdown complete.")
+                    logger.info(f"AOF persistence file: {aof_path}")
+                except Exception as e:
+                    logger.error(f"Error during final AOF dump: {e}")
         except socket.error as err:
             logger.error(f"Server error: {err}")

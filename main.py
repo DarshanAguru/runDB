@@ -1,5 +1,5 @@
 import argparse
-from server import Server
+from server import Server, Shutdown
 import logging
 from config import Config
 
@@ -14,7 +14,10 @@ def main():
    
     logger.info("Running the RunDB")
     
-    Server.runAsyncTcpServer(args.host, args.port) #Async Server, can handle multiple clients.
+    # Setup signal handlers for graceful shutdown before starting the server loop
+    Shutdown.handleGracefully()
+    
+    Server.runAsyncTcpServer(args.host, args.port)
 
 if __name__ == "__main__":
     main()

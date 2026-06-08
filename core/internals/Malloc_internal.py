@@ -6,7 +6,6 @@ libc = ctypes.CDLL(util.find_library("c"))
 
 libc.malloc.argtypes = [ctypes.c_size_t]
 libc.malloc.restype = ctypes.c_void_p
-
 libc.free.argtypes = [ctypes.c_void_p]
 libc.free.restype = None
 
