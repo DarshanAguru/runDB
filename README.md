@@ -51,6 +51,7 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
   - High 4 bits: Redis Object Type (e.g., `TYPE_STRING = 0`)
   - Low 4 bits: Redis Object Encoding (e.g., `RAW = 0`, `INT = 1`, `EMBSTR = 8`)
   - Bit-packing formula: `((type & 0x0F) << 4) | (encoding & 0x0F)`
+- **Native C Allocation via `ctypes`**: To bypass Python's high object memory overhead and simulate actual C-level structures, `runDB` wraps system library memory allocations using `ctypes`. It directly binds to `libc.malloc()` and `libc.free()`, allowing manual C-level heap allocation and precise tracking of allocated bytes via `MemTracker`.
 
 ### 2. High-Performance Eviction Strategy
 
@@ -74,6 +75,7 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
 ### 5. Asynchronous Graceful Shutdown & Atomic State Coordination
 
 To prevent data loss and ensure system stability upon termination:
+
 - **Signal Trapping**: `runDB` intercepts OS process termination signals (`SIGTERM`, `SIGINT`, etc.) and schedules a shutdown via an asynchronous signal monitor task (`waitForSignal`).
 - **Atomic Engine Status (`AtomicInt`)**: State is tracked using three atomic statuses: `ENGINE_IDLE = 0`, `ENGINE_BUSY = 1`, and `ENGINE_SHUTDOWN = 2`.
   - While processing events or cron key expirations, the server transitions the state from `ENGINE_IDLE` to `ENGINE_BUSY` using Compare-And-Swap (CAS).
@@ -108,6 +110,9 @@ The project is structured into modular components:
   - `RedisCmd.py`: Data structure representing a parsed Redis command.
   - `FDComm.py`: Helper for non-blocking file descriptor communication.
   - `Client.py`: Encapsulates client socket references, connection states, and transaction queues per client.
+  - `internals/`: Low-level native C-memory allocation and tracking subsystem:
+    - `Malloc.py`: Python interface providing C-memory allocation tools (`alloc_string`, `alloc_int`, etc.) via `ctypes`.
+    - `Malloc_internal.py`: Directly invokes `libc` `malloc`/`free` and implements `MemTracker` for real-time bytes allocation monitoring.
 - **`server/`**:
 
   - `Server.py`: Contains a high-concurrency, asynchronous TCP server utilizing Linux `select.epoll`.
@@ -169,18 +174,20 @@ OK
 
 Modify `config.py` to adjust system limits:
 
-| Parameter              | Default          | Description                                                            |
-| ---------------------- | ---------------- | ---------------------------------------------------------------------- |
-| `HOST`                 | `0.0.0.0`        | Binding address                                                        |
-| `PORT`                 | `7379`           | Listening port                                                         |
-| `KEY_LIMIT`            | `100`            | Maximum number of keys allowed in the store                            |
-| `MAX_CLIENTS`          | `10,000`         | Maximum number of concurrent client connections                        |
-| `AOF_FILE`             | `run-master.aof` | Filename used for AOF persistence dumping                              |
-| `EVICTION_STRATEGY`    | `allkeys-lru`    | Strategy for memory reclamation (`simple-first`, `allkeys-random`, `allkeys-lru`) |
-| `EVICTION_RATIO`       | `0.2`            | Fraction of keys evicted during eviction                               |
-| `EVICTION_POOL_SIZE`   | `16`             | Candidate pool size for `allkeys-lru` eviction strategy                |
-| `EVICTION_SAMPLE_SIZE` | `5`              | Number of keys sampled on each pass to populate eviction pool          |
-| `DB_COUNT`             | `4`              | Number of databases configured in the server                           |
+| Parameter              | Default            | Description                                                                             |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| `HOST`                 | `"0.0.0.0"`        | Binding address                                                                         |
+| `PORT`                 | `7379`             | Listening port                                                                          |
+| `MEMORY_LIMIT`         | `1,048,576` (1 MB) | Maximum allocated C-memory limit in bytes                                               |
+| `MAX_CLIENTS`          | `10,000`           | Maximum number of concurrent client connections                                         |
+| `CRON_FREQ_INTERVAL`   | `1`                | Periodic time interval (in seconds) for active key expiration check                      |
+| `AOF_FILE`             | `"run-master.aof"` | Filename used for AOF persistence dumping                                               |
+| `EVICTION_STRATEGY`    | `"allkeys-lru"`    | Strategy for memory reclamation (`simple-first`, `allkeys-random`, `allkeys-lru`)       |
+| `EVICTION_RATIO`       | `0.1`              | Fraction of keys evicted during eviction                                                |
+| `DB_COUNT`             | `4`                | Number of databases configured in the server                                            |
+| `LRU_BITS_MASK`        | `0x00FFFFFF`       | 24-bit mask for LRU clock tracking                                                      |
+| `EVICTION_POOL_SIZE`   | `16`               | Candidate pool size for `allkeys-lru` eviction strategy                                 |
+| `EVICTION_SAMPLE_SIZE` | `5`                | Number of keys sampled on each pass to populate eviction pool                           |
 
 ---
 
