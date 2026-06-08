@@ -3,7 +3,7 @@
 class Config:
     HOST = "0.0.0.0"                                     # host IP address
     PORT = 7379                                          # host port
-    MEMORY_LIMIT = 2 * 1024                              # Max memory limit in bytes (2 KB just for testing)
+    MEMORY_LIMIT = 1 * 1024 * 1024                       # Max memory limit in bytes (1 MB just for testing)
     MAX_CLIENTS = 10_000                                 # Max number of clients 
     CRON_FREQ_INTERVAL = 1                               # Periodic Time interval (in secs) for checking for expired keys 
     AOF_FILE = "run-master.aof"                          # File name for AOF Logging
