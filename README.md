@@ -31,6 +31,8 @@ This project was built to gain hands-on experience with:
 - **Memory Optimized**: Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently.
 - **Type Awareness**: Automatically deduces and stores object types (`STRING`) and encodings (`INT`, `EMBSTR`, `RAW`).
 - **Key Expiration**: Passive (lazy) deletion on access and active expiration strategies (random sampling) to clean up stale data.
+- **Graceful Shutdown**: Traps OS termination signals, coordinates with active request executors atomically, and triggers a final AOF persistence dump before exiting cleanly.
+- **Redis Transactions**: Full transaction support with `MULTI`, `EXEC`, and `DISCARD` executing queued commands isolated per client connection.
 - **Eviction Policies**: Memory reclamation strategies to maintain a hard keys limit:
   - `simple-first`: Evicts a single random key when the memory limit is reached.
   - `allkeys-random`: Evicts a configurable ratio (e.g., 20%) of random keys in the database using high-performance sample selection.
@@ -67,6 +69,22 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
 - Operations like `BGREWRITEAOF` are CPU and I/O intensive. If run on the main event loop, they would block thousands of connected clients.
 - `runDB` offloads this by spawning a child process using Python's `multiprocessing.Process`. By leveraging the OS-level `fork()` capability, the child process operates on a **Copy-On-Write (COW)** snapshot of the memory pages. This allows the server to continue handling incoming client queries concurrently with zero locks.
 
+### 5. Asynchronous Graceful Shutdown & Atomic State Coordination
+
+To prevent data loss and ensure system stability upon termination:
+- **Signal Trapping**: `runDB` intercepts OS process termination signals (`SIGTERM`, `SIGINT`, etc.) and schedules a shutdown via an asynchronous signal monitor task (`waitForSignal`).
+- **Atomic Engine Status (`AtomicInt`)**: State is tracked using three atomic statuses: `ENGINE_IDLE = 0`, `ENGINE_BUSY = 1`, and `ENGINE_SHUTDOWN = 2`.
+  - While processing events or cron key expirations, the server transitions the state from `ENGINE_IDLE` to `ENGINE_BUSY` using Compare-And-Swap (CAS).
+  - When a shutdown signal is caught, the signal monitor waits for the engine to leave `ENGINE_BUSY` (ensuring in-flight commands and background maintenance complete cleanly).
+  - Once idle, the status transitions to `ENGINE_SHUTDOWN` atomically, preventing the event loop from accepting new work or requests.
+- **Persistence Dump**: The monitor invokes a final `AOF.dumpAllAOF()` persistence dump to dump the in-memory keyspace before exiting.
+- **Clean Coroutine Exit**: The orchestrator in `main.py` awaits the shutdown monitor, cleanly cancels the running TCP server task, and exits the process with code 0 without traceback noise.
+
+### 6. Object-Oriented Client Model & Asynchronous Transaction Isolation
+
+- **Encapsulated Client State**: Active connections are tracked cleanly in `Server.con_clients` via modern `Client` objects, removing manual connection/socket mappings.
+- **Isolated Transaction States**: Transaction queues (`cqueue`) and states (`isTrans`) are bound directly to their corresponding `Client` instance, ensuring concurrent client transactions are fully isolated and executed in RESP array batch format.
+
 ---
 
 ## Architecture
@@ -87,6 +105,7 @@ The project is structured into modular components:
   - `stats.py`: Tracks and manages keyspace statistics across multiple Redis databases.
   - `RedisCmd.py`: Data structure representing a parsed Redis command.
   - `FDComm.py`: Helper for non-blocking file descriptor communication.
+  - `Client.py`: Encapsulates client socket references, connection states, and transaction queues per client.
 - **`server/`**:
 
   - `Server.py`: Contains a high-concurrency, asynchronous TCP server utilizing Linux `select.epoll`.
@@ -178,6 +197,9 @@ Modify `config.py` to adjust system limits:
 | `CLIENT [args...]`           | Client connection command placeholder.                                    |
 | `LATENCY [args...]`          | Latency monitoring command placeholder.                                   |
 | `BGREWRITEAOF`               | Triggers a background process (forked child) to dump state to AOF file.   |
+| `MULTI`                      | Marks the start of a transaction block.                                   |
+| `EXEC`                       | Executes all queued commands in a transaction block.                      |
+| `DISCARD`                    | Flushes all queued commands inside a transaction block.                   |
 
 ## License
 

@@ -7,10 +7,7 @@ from .RedisObject import RedisObject, REDIS_OBJECT_ENCODINGS, REDIS_OBJECT_TYPES
 from .assertions import RedisAssertions
 from .encoding import Encoder
 from .Stats import Stats
-
-class SupportsSend(Protocol):
-    def send(self, data: bytes) -> int:
-        ...
+from .Client import Client
 
 # Standard RESP responses
 class RESP_RESPONSES:
@@ -24,33 +21,44 @@ class RESP_RESPONSES:
 class Evaluator:
     # Main entry point to evaluate commands and send pipelined responses
     @staticmethod
-    def evalAndRespond(cmds: list[RedisCmd], conn: SupportsSend) -> Exception | None:
+    def evalAndRespond(cmds: list[RedisCmd], conn: Client) -> Exception | None:
         buffer = bytearray()
         for cmd in cmds:
-            if cmd.cmd == "PING":
-                res = Evaluator.__evalPING(cmd.args)
-            elif cmd.cmd == "SET":
-                res = Evaluator.__evalSET(cmd.args)
-            elif cmd.cmd == "GET":
-                res = Evaluator.__evalGET(cmd.args)
-            elif cmd.cmd == "TTL":
-                res = Evaluator.__evalTTL(cmd.args)
-            elif cmd.cmd == "DEL":
-                res = Evaluator.__evalDEL(cmd.args)
-            elif cmd.cmd == "EXPIRE":
-                res = Evaluator.__evalEXPIRE(cmd.args)
-            elif cmd.cmd == "BGREWRITEAOF":
-                res = Evaluator.__evalBGREWRITEAOF(cmd.args)
-            elif cmd.cmd == "INCR":
-                res = Evaluator.__evalINCR(cmd.args)
-            elif cmd.cmd == "INFO":
-                res = Evaluator.__evalINFO(cmd.args)
-            elif cmd.cmd == "CLIENT":
-                res = Evaluator.__evalCLIENT(cmd.args)
-            elif cmd.cmd == "LATENCY":
-                res = Evaluator.__evalLATENCY(cmd.args)
+            # If transaction is active, queue the command unless it is a control command
+            if hasattr(conn, 'isTrans') and conn.isTrans and cmd.cmd not in ("EXEC", "DISCARD", "MULTI"):
+                conn.cqueue.append(cmd)
+                res = b"+QUEUED\r\n"
             else:
-                res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
+                if cmd.cmd == "PING":
+                    res = Evaluator.__evalPING(cmd.args)
+                elif cmd.cmd == "SET":
+                    res = Evaluator.__evalSET(cmd.args)
+                elif cmd.cmd == "GET":
+                    res = Evaluator.__evalGET(cmd.args)
+                elif cmd.cmd == "TTL":
+                    res = Evaluator.__evalTTL(cmd.args)
+                elif cmd.cmd == "DEL":
+                    res = Evaluator.__evalDEL(cmd.args)
+                elif cmd.cmd == "EXPIRE":
+                    res = Evaluator.__evalEXPIRE(cmd.args)
+                elif cmd.cmd == "BGREWRITEAOF":
+                    res = Evaluator.__evalBGREWRITEAOF(cmd.args)
+                elif cmd.cmd == "INCR":
+                    res = Evaluator.__evalINCR(cmd.args)
+                elif cmd.cmd == "INFO":
+                    res = Evaluator.__evalINFO(cmd.args)
+                elif cmd.cmd == "CLIENT":
+                    res = Evaluator.__evalCLIENT(cmd.args)
+                elif cmd.cmd == "LATENCY":
+                    res = Evaluator.__evalLATENCY(cmd.args)
+                elif cmd.cmd == "MULTI":
+                    res = Evaluator.__evalMULTI(conn, cmd.args)
+                elif cmd.cmd == "EXEC":
+                    res = Evaluator.__evalEXEC(conn, cmd.args)
+                elif cmd.cmd == "DISCARD":
+                    res = Evaluator.__evalDISCARD(conn, cmd.args)
+                else:
+                    res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
             
             buffer.extend(res)
         
@@ -241,3 +249,25 @@ class Evaluator:
             return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'latency' command")
         
         return Encoder.encode([])
+    
+    @staticmethod
+    def __evalMULTI(conn: Client, args: List[str]) -> bytes:
+        if conn.isTrans:
+            return Evaluator.__getErrorResponse("ERR MULTI calls can't be nested")
+        conn.TransBegin()
+        return b"+OK\r\n"
+    
+    @staticmethod
+    def __evalEXEC(conn: Client, args: List[str]) -> bytes:
+        if not conn.isTrans:
+            return Evaluator.__getErrorResponse("ERR EXEC without MULTI")
+        return conn.TransExec()
+    
+    @staticmethod
+    def __evalDISCARD(conn: Client, args: List[str]) -> bytes:
+        if not conn.isTrans:
+            return Evaluator.__getErrorResponse("ERR DISCARD without MULTI")
+        conn.TransDiscard()
+        return b"+OK\r\n"
+
+    

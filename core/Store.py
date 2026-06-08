@@ -22,10 +22,12 @@ class Store:
             from .eviction import Eviction
             Eviction.evict()
 
+        is_new_key = key not in cls.store
         cls.store[key] = value
         if ex_duration_sec > 0:
             cls.setExpiry(value, ex_duration_sec)
-        Stats.increment(0, "keys")
+        if is_new_key:
+            Stats.increment(0, "keys")
 
         # After inserting, if we exceed the limit, evict immediately to maintain the invariant
         while len(cls.store) > 0 and MemTracker.allocated > Config.MEMORY_LIMIT:
