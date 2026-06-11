@@ -11,7 +11,7 @@ class Printer:
         GRAY = '\033[90m'
 
     @staticmethod
-    def printRunDBHeader(ip, port):
+    def printRunDBBanner(ip, port):
         res = r"""
     ███████████                         ██████████   ███████████    
     ░░███░░░░░███                       ░░███░░░░███ ░░███░░░░░███   

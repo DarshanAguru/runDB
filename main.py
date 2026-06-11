@@ -1,5 +1,6 @@
 import argparse
-from server import Server, Shutdown, Printer
+from server import Server
+from server.util import Shutdown, Printer
 import logging
 from config import Config
 import asyncio
@@ -29,8 +30,8 @@ def pre_run_check(logger):
     
     # 1. Check if OS is Linux
     if not sys.platform.startswith("linux"):
-        logger.error("Pre-run check failed: runDB is compatible with Linux environments only.")
-        print("Error: runDB is compatible with Linux environments only (requires select.epoll).", file=sys.stderr)
+        logger.error("Pre-run check failed: RunDB is compatible with Linux environments only.")
+        print("Error: RunDB is compatible with Linux environments only (requires select.epoll).", file=sys.stderr)
         sys.exit(1)
         
     # 2. Check if select.epoll is supported
@@ -63,7 +64,7 @@ def main():
     parser.add_argument("--port", type=int, default=Config.PORT, help="Port for RunDB  │ number (default: %(default)s)")                                   
     args = parser.parse_args()
    
-    Printer.printRunDBHeader(args.host, args.port)
+    Printer.printRunDBBanner(args.host, args.port)
     
     try:
         asyncio.run(main_async(args))

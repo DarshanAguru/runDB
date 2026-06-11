@@ -43,7 +43,7 @@ class AOF:
     # Loads and restores database state from the AOF file
     @staticmethod
     def loadAllAOF() -> None:
-        from server import Printer
+        from server.util import Printer
         if not os.path.exists(Config.AOF_FILE):
             Printer.printAOFEmpty()
             return

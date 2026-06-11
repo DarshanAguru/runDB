@@ -1,18 +1,18 @@
-# runDB
+# RunDB
 
 [![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/DarshanAguru/runDB/releases)
 [![License](https://img.shields.io/badge/license-BSD_3--Clause-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](#prerequisites)
 
 > [!NOTE]
-> **runDB** is a learning-focused project created to explore and understand Redis internals in simpler terms. It is intended for educational purposes and is not meant to be a production database replacement.
+> **RunDB** is a learning-focused project created to explore and understand Redis internals in simpler terms. It is intended for educational purposes and is not meant to be a production database replacement.
 
 > [!IMPORTANT]
-> **Linux-Only**: Since the high-concurrency asynchronous network engine is built using the Linux-specific `select.epoll` API, `runDB` is compatible with **Linux environments only**.
+> **Linux-Only**: Since the high-concurrency asynchronous network engine is built using the Linux-specific `select.epoll` API, `RunDB` is compatible with **Linux environments only**.
 
 A lightweight, simplified implementation of a Redis-like in-memory Key-Value store. It demonstrates core concepts such as the Redis Serialization Protocol (RESP), high-concurrency asynchronous networking with `epoll`, and internal memory-management strategies.
 
-![runDB Architecture](runDB.png)
+![RunDB Architecture](RunDB.png)
 
 ## Learning Objectives
 
@@ -49,14 +49,14 @@ This project was built to gain hands-on experience with:
 
 ### 1. Memory Optimization & Bit-Packing
 
-To minimize the memory footprint of storing millions of keys in-memory, `runDB` employs custom optimization techniques:
+To minimize the memory footprint of storing millions of keys in-memory, `RunDB` employs custom optimization techniques:
 
 - **`__slots__` in `RedisObject`**: By defining `__slots__ = ["val", "expire_at", "typeEncoding", "lat"]` inside our core object wrapper, we disable the automatic creation of dynamic instance dictionaries (`__dict__`) and weak references (`__weakref__`). This reduces memory consumption by **~60%** per object.
 - **Bit-Packed Type/Encoding**: Instead of storing the object type and encoding as separate integer attributes (which consume 28 bytes each in Python), they are bit-packed into a single 8-bit integer field (`typeEncoding`).
   - High 4 bits: Redis Object Type (e.g., `TYPE_STRING = 0`)
   - Low 4 bits: Redis Object Encoding (e.g., `RAW = 0`, `INT = 1`, `EMBSTR = 8`)
   - Bit-packing formula: `((type & 0x0F) << 4) | (encoding & 0x0F)`
-- **Native C Allocation (`zmalloc`)**: To bypass Python's high object memory overhead and simulate actual C-level structures, `runDB` implements a Redis-style native allocation subsystem via `ctypes`.
+- **Native C Allocation (`zmalloc`)**: To bypass Python's high object memory overhead and simulate actual C-level structures, `RunDB` implements a Redis-style native allocation subsystem via `ctypes`.
   - It binds directly to `libc.malloc()` and `libc.free()`, prepending an 8-byte prefix size header to each allocated block.
   - Real-time allocated memory bytes are tracked in constant time by querying the prefix size header.
   - In Linux environments, native allocations can be powered by `jemalloc` (located in the `./dll/` directory) by starting the server with preloading, ensuring low memory fragmentation just like real Redis.
@@ -64,27 +64,27 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
 ### 2. High-Performance Eviction Strategy
 
 - **Sampling over Shuffling**: Dict key retrieval in Python preserves insertion order. To select a random key for eviction, a naive approach would shuffle the entire key list using `random.shuffle()`, which incurs a highly inefficient $O(N)$ operation for shuffling all keys.
-- `runDB` solves this with ultra-fast sampling methods:
+- `RunDB` solves this with ultra-fast sampling methods:
   - For `simple-first`, it uses `random.choice(list(store.keys()))` to instantly locate and evict a single random key.
   - For `allkeys-random`, it uses `random.sample(list(store.keys()), evict_keys_count)` to retrieve a specific sub-sample of keys to evict in a single pass, avoiding the CPU bottleneck of shuffling the entire keyspace.
   - For `allkeys-lru`, it employs an **Approximated LRU Eviction Pool** of size 16 (or custom size) sorted by key idle times ascending. It samples keys dynamically, inserts them into the sorted pool by comparing with the worst candidate (index 0), and evicts from the pool's end (maximum idle time).
 
 ### 3. Active Expiration Loop
 
-- While expired keys are lazily deleted on access (passive deletion), `runDB` also runs an **Active Expiration cron job** every 1 second inside the event loop.
+- While expired keys are lazily deleted on access (passive deletion), `RunDB` also runs an **Active Expiration cron job** every 1 second inside the event loop.
 - It samples up to 20 keys containing set expirations. If any of those 20 keys are expired, they are immediately deleted.
-- If more than 25% (i.e. > 5 keys) of the sampled set are found to be expired, `runDB` loops again to actively clean up expired keys. This active loop continues until the fraction of expired keys drops below 25%, protecting memory without blocking client sockets.
+- If more than 25% (i.e. > 5 keys) of the sampled set are found to be expired, `RunDB` loops again to actively clean up expired keys. This active loop continues until the fraction of expired keys drops below 25%, protecting memory without blocking client sockets.
 
 ### 4. Non-Blocking Background Operations
 
 - Operations like `BGREWRITEAOF` are CPU and I/O intensive. If run on the main event loop, they would block thousands of connected clients.
-- `runDB` offloads this by spawning a child process using Python's `multiprocessing.Process`. By leveraging the OS-level `fork()` capability, the child process operates on a **Copy-On-Write (COW)** snapshot of the memory pages. This allows the server to continue handling incoming client queries concurrently with zero locks.
+- `RunDB` offloads this by spawning a child process using Python's `multiprocessing.Process`. By leveraging the OS-level `fork()` capability, the child process operates on a **Copy-On-Write (COW)** snapshot of the memory pages. This allows the server to continue handling incoming client queries concurrently with zero locks.
 
 ### 5. Asynchronous Graceful Shutdown & Atomic State Coordination
 
 To prevent data loss and ensure system stability upon termination:
 
-- **Signal Trapping**: `runDB` intercepts OS process termination signals (`SIGTERM`, `SIGINT`, etc.) and schedules a shutdown via an asynchronous signal monitor task (`waitForSignal`).
+- **Signal Trapping**: `RunDB` intercepts OS process termination signals (`SIGTERM`, `SIGINT`, etc.) and schedules a shutdown via an asynchronous signal monitor task (`waitForSignal`).
 - **Atomic Engine Status (`AtomicInt`)**: State is tracked using three atomic statuses: `ENGINE_IDLE = 0`, `ENGINE_BUSY = 1`, and `ENGINE_SHUTDOWN = 2`.
   - While processing events or cron key expirations, the server transitions the state from `ENGINE_IDLE` to `ENGINE_BUSY` using Compare-And-Swap (CAS).
   - When a shutdown signal is caught, the signal monitor waits for the engine to leave `ENGINE_BUSY` (ensuring in-flight commands and background maintenance complete cleanly).
@@ -132,7 +132,7 @@ The project is structured into modular components:
   - `test_redis_object.py`: Ensures C-level struct sizes, layouts, and slot constraints are respected.
   - `test_store.py`: Asserts database key isolation and expiration behavior.
   - `test_evaluator.py`: Verifies individual commands and MULTI/EXEC transaction isolation.
-- **`utils/`**: Helper utilities for benchmarking and manual storming.
+- **`testing_utils/`**: Helper utilities for benchmarking and manual storming.
   - `set_storm.py`: Floods the database with fast continuous write requests.
   - `set_storm_with_expiration.py`: Benchmarks lazy and active key expiration cleanup loops under load.
   - `eviction_storm.py`: Overflows the memory capacity with large keys to verify eviction algorithms.
@@ -148,7 +148,7 @@ The project is structured into modular components:
 
 ### Running the Server
 
-To start the runDB server with default settings (standard C allocator):
+To start the RunDB server with default settings (standard C allocator):
 
 ```bash
 python3 main.py
@@ -162,7 +162,7 @@ LD_PRELOAD=./dll/libjemalloc.so python3 main.py
 
 ### Testing the Server
 
-Since **runDB** is compatible with the RESP protocol, you can use the standard `redis-cli` to interact with it:
+Since **RunDB** is compatible with the RESP protocol, you can use the standard `redis-cli` to interact with it:
 
 ```bash
 redis-cli -p 7379
@@ -189,7 +189,7 @@ OK
 
 ### Pipelining
 
-**runDB** supports Redis pipelining. You can test this using `netcat`:
+**RunDB** supports Redis pipelining. You can test this using `netcat`:
 
 ```bash
 (printf '*1\r\n$4\r\nPING\r\n*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n*2\r\n$3\r\nGET\r\n$1\r\nk\r\n';) | nc localhost 7379
@@ -197,7 +197,7 @@ OK
 
 ### Running Tests
 
-**runDB** comes with an automated unit test suite. You can run all test suites (including RESP processor, type encoder, storage, and command evaluator tests) using the following command:
+**RunDB** comes with an automated unit test suite. You can run all test suites (including RESP processor, type encoder, storage, and command evaluator tests) using the following command:
 
 ```bash
 python3 tests/run_tests.py
@@ -209,19 +209,19 @@ python3 tests/run_tests.py
 
 Modify `config.py` to adjust system limits:
 
-| Parameter              | Default            | Description                                                                             |
-| ---------------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| Parameter                | Default              | Description                                                                             |
+| ------------------------ | -------------------- | --------------------------------------------------------------------------------------- |
 | `HOST`                 | `"0.0.0.0"`        | Binding address                                                                         |
 | `PORT`                 | `7379`             | Listening port                                                                          |
 | `MEMORY_LIMIT`         | `1,048,576` (1 MB) | Maximum allocated C-memory limit in bytes                                               |
 | `MAX_CLIENTS`          | `10,000`           | Maximum number of concurrent client connections                                         |
-| `CRON_FREQ_INTERVAL`   | `1`                | Periodic time interval (in seconds) for active key expiration check                      |
+| `CRON_FREQ_INTERVAL`   | `1`                | Periodic time interval (in seconds) for active key expiration check                     |
 | `AOF_FILE`             | `"run-master.aof"` | Filename used for AOF persistence dumping                                               |
-| `EVICTION_STRATEGY`    | `"allkeys-lru"`    | Strategy for memory reclamation (`simple-first`, `allkeys-random`, `allkeys-lru`)       |
+| `EVICTION_STRATEGY`    | `"allkeys-lru"`    | Strategy for memory reclamation (`simple-first`, `allkeys-random`, `allkeys-lru`) |
 | `EVICTION_RATIO`       | `0.1`              | Fraction of keys evicted during eviction                                                |
 | `DB_COUNT`             | `4`                | Number of databases configured in the server                                            |
 | `LRU_BITS_MASK`        | `0x00FFFFFF`       | 24-bit mask for LRU clock tracking                                                      |
-| `EVICTION_POOL_SIZE`   | `16`               | Candidate pool size for `allkeys-lru` eviction strategy                                 |
+| `EVICTION_POOL_SIZE`   | `16`               | Candidate pool size for `allkeys-lru` eviction strategy                               |
 | `EVICTION_SAMPLE_SIZE` | `5`                | Number of keys sampled on each pass to populate eviction pool                           |
 
 ---

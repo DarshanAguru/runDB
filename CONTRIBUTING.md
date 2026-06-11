@@ -1,6 +1,6 @@
-# Contributing to runDB
+# Contributing to RunDB
 
-First off, thank you for considering contributing to **runDB**! It is people like you who make learning-focused projects so valuable for the community.
+First off, thank you for considering contributing to **RunDB**! It is people like you who make learning-focused projects so valuable for the community.
 
 Please read through the guidelines below before making or submitting changes.
 
@@ -17,7 +17,7 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 * If not, open a new issue containing:
   * A clear, descriptive title.
   * Steps to reproduce the bug.
-  * Your operating system (remember, `runDB` is Linux-only due to `select.epoll`).
+  * Your operating system (remember, `RunDB` is Linux-only due to `select.epoll`).
   * Expected vs. actual behavior, along with relevant server logs.
 
 ### 2. Suggesting Enhancements
@@ -26,7 +26,7 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ### 3. Submitting Pull Requests
 * **Fork** the repository and create your branch from `main`.
-* If you've added code that should be tested, add or update appropriate scripts in the `utils/` directory.
+* If you've added code that should be tested, add or update appropriate scripts in the `testing_utils/` directory.
 * Ensure your code adheres to Python standards (PEP 8).
 * Update documentation (`README.md`, etc.) if your change introduces new configuration settings, commands, or behaviors.
 * Write clear, descriptive commit messages.
@@ -65,8 +65,8 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
    You can also run utility scripts to storm/benchmark the database:
    ```bash
-   python3 utils/set_storm.py
-   python3 utils/set_storm_with_expiration.py
-   python3 utils/eviction_storm.py
-   python3 utils/transaction_storm.py
+   python3 testing_utils/set_storm.py
+   python3 testing_utils/set_storm_with_expiration.py
+   python3 testing_utils/eviction_storm.py
+   python3 testing_utils/transaction_storm.py
    ```

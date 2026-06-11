@@ -8,8 +8,8 @@ import errno
 from core import RESPProcessor, RedisCmd, Evaluator, FDComm, Store, Expiration
 from core.Client import Client
 from config import Config
-from .Shutdown import Shutdown, ENGINE_IDLE, ENGINE_BUSY, ENGINE_SHUTDOWN
-from .Printer import Printer
+from .util.Shutdown import Shutdown, ENGINE_IDLE, ENGINE_BUSY, ENGINE_SHUTDOWN
+from .util.Printer import Printer
 
 logger = logging.getLogger(__name__)
 
