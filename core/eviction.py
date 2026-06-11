@@ -9,67 +9,60 @@ logger = logging.getLogger(__name__)
 
 class Eviction:
     
-    # Triggers the eviction process to free up space
+    # Triggers the eviction process to free up space in a specific database
     @staticmethod
-    def evict() -> None:
+    def evict(db: int = 0) -> None:
         if Config.EVICTION_STRATEGY == "simple-first":
-            Eviction.__evictRandomOne()
+            Eviction.__evictRandomOne(db)
         elif Config.EVICTION_STRATEGY == "allkeys-random":
-            Eviction.__evictAllkeysRandom()
+            Eviction.__evictAllkeysRandom(db)
         elif Config.EVICTION_STRATEGY == "allkeys-lru":
-            Eviction.__evictAllKeysLRU()
+            Eviction.__evictAllKeysLRU(db)
         else:
             logger.error(f"Invalid eviction strategy: {Config.EVICTION_STRATEGY}")
     
-    # Evicts one random key-value pair from the store
+    # Evicts one random key-value pair from the store in a database
     @staticmethod
-    def __evictRandomOne():
-        if not Store.store:
+    def __evictRandomOne(db: int):
+        store = Store.stores[db]
+        if not store:
             return
-        # Since python preserve order of insertion in dict
-        # retrieval isn't random.
-        # So random.choice : to get a random key from keys list
-        # and then we can evict it.
-        key = random.choice(list(Store.store.keys()))
-        Store.delete(key)
+        key = random.choice(list(store.keys()))
+        Store.delete(key, db)
     
-    # Evicts random (EVICTION_RATIO %) keys from the store
+    # Evicts random (EVICTION_RATIO %) keys from the store in a database
     @staticmethod
-    def __evictAllkeysRandom():
-        if not Store.store:
+    def __evictAllkeysRandom(db: int):
+        store = Store.stores[db]
+        if not store:
             return
-        # Number of keys to be evicted is a percentage of current active keys (minimum 1 key)
-        evictKeys = max(1, int(Config.EVICTION_RATIO * len(Store.store)))
-        # Since python preserve order of insertion in dict
-        # retrieval isn't random.
-        # So random.sample : to get a random keys list from dict keys list
-        # and then we can evict it.
-        keys = random.sample(list(Store.store.keys()), min(evictKeys, len(Store.store)))
+        evictKeys = max(1, int(Config.EVICTION_RATIO * len(store)))
+        keys = random.sample(list(store.keys()), min(evictKeys, len(store)))
         for key in keys:
-            Store.delete(key)
+            Store.delete(key, db)
     
     @staticmethod
-    def __populateEvictionPool(count: int) -> None:
-        if not Store.store:
+    def __populateEvictionPool(db: int, count: int) -> None:
+        store = Store.stores[db]
+        if not store:
             return
-        # ramdom.sample: reason in comments of "__evictAllKeysRandom" function
-        # min(): For getting Keys without raising ValueError
-        keys = random.sample(list(Store.store.keys()), min(count, len(Store.store)))
+        keys = random.sample(list(store.keys()), min(count, len(store)))
         for key in keys:
-            obj = Store.store.get(key)
+            obj = store.get(key)
             if obj is not None:
                 # Add key and its last accessed timestamp (LAT) to the eviction pool
                 EvictPool.add(key, obj.getLAT())
     
     @staticmethod
-    def __evictAllKeysLRU() -> None:
+    def __evictAllKeysLRU(db: int) -> None:
+        store = Store.stores[db]
         # Number of keys to be evicted is a percentage of current active keys (minimum 1 key)
-        evictKeys = max(1, int(Config.EVICTION_RATIO * len(Store.store)))
+        evictKeys = max(1, int(Config.EVICTION_RATIO * len(store)))
         i = 0
         while i < evictKeys:
             # If the eviction pool is empty, attempt to populate it with a new sample
             if EvictPool.isEmpty():
-                Eviction.__populateEvictionPool(Config.EVICTION_SAMPLE_SIZE)
+                Eviction.__populateEvictionPool(db, Config.EVICTION_SAMPLE_SIZE)
 
                 # If the store is empty or no candidates are left to populate, stop eviction
                 if EvictPool.isEmpty():
@@ -80,15 +73,15 @@ class Eviction:
                 continue
             
             # Retrieve object from store to check for stale/already deleted pool entries
-            obj = Store.store.get(item.key)
+            obj = store.get(item.key)
 
             # Skip if the key is stale (already deleted or expired)
             if obj is None:
                 continue
 
             # Delete the key and increment the count of successfully evicted keys
-            Store.delete(item.key)
+            Store.delete(item.key, db)
             i+=1
-        logger.debug(f"Evicted {i} keys using allkeys-lru eviction strategy")
+        logger.debug(f"Evicted {i} keys from db{db} using allkeys-lru eviction strategy")
         return
             

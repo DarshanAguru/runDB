@@ -4,6 +4,7 @@ import logging
 import asyncio
 import threading
 from config import Config
+from .Printer import Printer
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class Shutdown:
 
     @staticmethod
     def shutdown_handler(signum, frame):
-        logger.warning(f"Received signal {signum}. Initiating graceful shutdown...")
+        Printer.printShutdownInitiated(signum)
         Shutdown.is_shutdown_requested = True
         Shutdown.signal_received = signum
         
@@ -89,17 +90,16 @@ class Shutdown:
     @staticmethod
     def saveOperation():
         aof_path = os.path.abspath(Config.AOF_FILE)
-        logger.info(f"Saving database checkpoint: dumping memory into file {aof_path}...")
+        Printer.printShutdownSaving(aof_path)
         from core.aof import AOF
         from core.internals.Malloc_internal import MemTracker
         try:
-            mem_mb = MemTracker.allocated / (1024 * 1024)
-            # conversion: 1 MB = 100 memory calories
-            calories = mem_mb * 100
+            pct_used = (MemTracker.allocated / Config.MEMORY_LIMIT) * 100
+            # 1% of memory capacity utilized = 100 memory calories burnt
+            calories = pct_used * 100
             
             AOF.dumpAllAOF()
-            logger.info(f"Successfully dumped data into file: {aof_path}")
-            logger.info("RunDB server shutdown complete.")
-            logger.info(f"👋 Bye bye! You burnt {calories:.2f} memory calories ({mem_mb:.4f} MB) while running! See you soon! 🏃‍♂️💨")
+            Printer.printShutdownSaved(aof_path)
+            Printer.printShutdownComplete(calories, pct_used, MemTracker.allocated)
         except Exception as e:
             logger.error(f"Error during final AOF dump: {e}")

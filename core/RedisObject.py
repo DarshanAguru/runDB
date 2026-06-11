@@ -25,61 +25,57 @@ class RedisObjectStruct(ctypes.Structure):
         ("size", ctypes.c_size_t)
     ]
 
-
-# Represents a stored Redis value with metadata (expiration, type, encoding)
 class RedisObject:
-    # Use slots to minimize memory overhead per object, supporting weak references for finalizers
+    # Using slots to minimize memory overhead per object, supporting weak references for finalizers
     __slots__ = ["_struct_ptr", "_finalizer", "__weakref__"]
 
     def __init__(self, val: Any, o_type: int, o_encoding: int) -> None:
-        # 1. Allocate RedisObjectStruct itself in native C memory
+        # Allocating RedisObjectStruct itself in native C memory
         self._struct_ptr = Malloc.alloc_struct(RedisObjectStruct)
         
-        # 2. Populate standard fields
+        # Populating standard fields
         struct = ctypes.cast(self._struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
         struct.typeEncoding = ((o_type & 0x0F) << 4) | (o_encoding & 0x0F)
         struct.lat = self.getLRUClock()
         struct.ptr = None
         struct.size = 0
 
-        # Register a finalizer to ensure both the nested value pointer and the struct itself are freed
+        # Registering finalizer to ensure both the nested value pointer and the struct itself are freed
         self._finalizer = weakref.finalize(
             self,
             self._cleanup,
             self._struct_ptr
         )
 
-        # 3. Call property setter to allocate and set the inner value pointer
+        # Calling property setter to allocate and set the inner value pointer
         self.val = val
 
     @staticmethod
     def _cleanup(struct_ptr: MallocInternal) -> None:
-        from .internals.Malloc_internal import libc, MemTracker
         if struct_ptr and struct_ptr.ptr:
             struct = ctypes.cast(struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
             if struct.ptr:
-                libc.free(struct.ptr)
-                MemTracker.free(struct.size)
+                MallocInternal.zfree(struct.ptr)
             struct_ptr.free()
 
     def free(self) -> None:
         if self._finalizer.alive:
             self._finalizer()
 
+    # Getter, gets the ptr for struct and dereferences it and returns the content
     @property
     def val(self) -> Any:
         struct = ctypes.cast(self._struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
         return struct
 
+    # Setter, updates/allocates memory for the value based on the type
     @val.setter
     def val(self, new_val: Any) -> None:
         struct = ctypes.cast(self._struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
         
         # Free existing data pointer if present
         if struct.ptr:
-            from .internals.Malloc_internal import libc, MemTracker
-            libc.free(struct.ptr)
-            MemTracker.free(struct.size)
+            MallocInternal.zfree(struct.ptr)
             struct.ptr = None
             struct.size = 0
 
@@ -89,11 +85,7 @@ class RedisObject:
         encoding = self.getEncoding()
         if encoding == REDIS_OBJECT_ENCODINGS.INT:
             size = ctypes.sizeof(ctypes.c_int32)
-            from .internals.Malloc_internal import libc, MemTracker
-            ptr = libc.malloc(size)
-            if not ptr:
-                raise MemoryError("MEMORY OVERFLOW")
-            MemTracker.alloc(size)
+            ptr = MallocInternal.zmalloc(size)
             ctypes.cast(ptr, ctypes.POINTER(ctypes.c_int32))[0] = int(new_val)
             struct.ptr = ptr
             struct.size = size
@@ -103,11 +95,7 @@ class RedisObject:
             else:
                 data = bytes(new_val)
             size = len(data) + 1
-            from .internals.Malloc_internal import libc, MemTracker
-            ptr = libc.malloc(size)
-            if not ptr:
-                raise MemoryError("MEMORY OVERFLOW")
-            MemTracker.alloc(size)
+            ptr = MallocInternal.zmalloc(size)
             ctypes.memmove(ptr, data + b"\0", size)
             struct.ptr = ptr
             struct.size = size

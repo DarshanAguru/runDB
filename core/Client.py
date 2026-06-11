@@ -16,6 +16,7 @@ class Client:
         self.isTrans = False
         self.comm = comm
         self.sock = None  # Set by Server when connection is accepted
+        self.db = 0       # Selected database (default: 0)
 
     def write(self, b: List[bytes] = None) -> int:
         return self.comm.writeToFd()

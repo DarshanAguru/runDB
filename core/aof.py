@@ -25,8 +25,14 @@ class AOF:
             temp_file = Config.AOF_FILE + ".tmp"
             with open(temp_file, 'wb') as file:
                 logger.debug(f"Child process rewriting AOF file at {temp_file}")
-                for k, val in Store.store.items():
-                    AOF.dumpKey(file, k, val)
+                for db_idx, store in enumerate(Store.stores):
+                    if not store:
+                        continue
+                    # Write SELECT command to switch to the correct database
+                    select_cmd = Encoder.encode(["SELECT", str(db_idx)])
+                    file.write(select_cmd)
+                    for k, val in store.items():
+                        AOF.dumpKey(file, k, val)
             
             # Atomic swap of the AOF file
             os.replace(temp_file, Config.AOF_FILE)
@@ -37,17 +43,18 @@ class AOF:
     # Loads and restores database state from the AOF file
     @staticmethod
     def loadAllAOF() -> None:
+        from server import Printer
         if not os.path.exists(Config.AOF_FILE):
-            logger.info("No AOF file found. Starting with empty database.")
+            Printer.printAOFEmpty()
             return
 
-        logger.info(f"Loading database from AOF file: {Config.AOF_FILE}")
+        Printer.printAOFLoading(Config.AOF_FILE)
         try:
             with open(Config.AOF_FILE, 'rb') as file:
                 data = file.read()
 
             if not data:
-                logger.info("AOF file is empty.")
+                Printer.printAOFEmpty()
                 return
 
             from .resp import RESPProcessor
@@ -86,10 +93,6 @@ class AOF:
             from .internals.Malloc_internal import MemTracker
             mtime = os.path.getmtime(Config.AOF_FILE)
             saved_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
-            mem_mb = MemTracker.allocated / (1024 * 1024)
-            logger.info(f"Restored from AOF file: {Config.AOF_FILE}")
-            logger.info(f"Checkpoint: AOF file saved time was {saved_time}")
-            logger.info(f"Successfully restored/executed {len(vals) if vals else 0} commands from the AOF checkpoint.")
-            logger.info(f"Memory restored: {MemTracker.allocated} bytes ({mem_mb:.4f} MB).")
+            Printer.printAOFRestored(Config.AOF_FILE, saved_time, len(vals) if vals else 0, MemTracker.allocated)
         except Exception as e:
             logger.error(f"Error loading AOF file: {e}")

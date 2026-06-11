@@ -1,61 +1,62 @@
 import time
-from typing import Dict
+from typing import Dict, List
 from config import Config
 from .RedisObject import RedisObject
-from .Stats import Stats
 from .internals.Malloc_internal import MemTracker
 
-# In-memory dictionary-based storage with eviction and lazy-deletion support
-class Store:
-    # Core data structure for storing all keys and their corresponding RedisObjects
-    store: Dict[str, RedisObject] = dict()
+class StoreMeta(type):
+    @property
+    def store(cls) -> Dict[str, RedisObject]:
+        return cls.stores[0]
 
-    # To store the keys with expiry set (Used for active eviction)
-    expires: Dict[RedisObject, int] = dict()
+    @property
+    def expires(cls) -> Dict[RedisObject, int]:
+        return cls.expires_list[0]
+
+# In-memory dictionary-based storage with eviction and lazy-deletion support
+class Store(metaclass=StoreMeta):
+    # Core data structures per database
+    stores: List[Dict[str, RedisObject]] = [dict() for _ in range(Config.DB_COUNT)]
+    expires_list: List[Dict[RedisObject, int]] = [dict() for _ in range(Config.DB_COUNT)]
 
     # Stores a key-value pair; triggers eviction if the storage limit is exceeded
-    # also increments keys count in Stats
     @classmethod
-    def put(cls, key: str, value: RedisObject, ex_duration_sec: int) -> None:
+    def put(cls, key: str, value: RedisObject, ex_duration_sec: int, db: int = 0) -> None:
         # Trigger eviction while total allocated C-memory exceeds MEMORY_LIMIT and keys exist to evict
-        while len(cls.store) > 0 and MemTracker.allocated > Config.MEMORY_LIMIT:
+        while len(cls.stores[db]) > 0 and MemTracker.allocated > Config.MEMORY_LIMIT:
             from .eviction import Eviction
-            Eviction.evict()
+            Eviction.evict(db)
 
-        is_new_key = key not in cls.store
-        cls.store[key] = value
+        cls.stores[db][key] = value
         if ex_duration_sec > 0:
-            cls.setExpiry(value, ex_duration_sec)
-        if is_new_key:
-            Stats.increment(0, "keys")
+            cls.setExpiry(value, ex_duration_sec, db)
 
         # After inserting, if we exceed the limit, evict immediately to maintain the invariant
-        while len(cls.store) > 0 and MemTracker.allocated > Config.MEMORY_LIMIT:
+        while len(cls.stores[db]) > 0 and MemTracker.allocated > Config.MEMORY_LIMIT:
             from .eviction import Eviction
-            Eviction.evict()
+            Eviction.evict(db)
 
     # Retrieves an object; deletes and returns None if it has expired
     @classmethod
-    def get(cls, key: str) -> RedisObject | None:
-        val = cls.store.get(key, None)
+    def get(cls, key: str, db: int = 0) -> RedisObject | None:
+        val = cls.stores[db].get(key, None)
         if val is None:
             return None
-        if cls.hasExpired(val):
-            cls.delete(key)
+        if cls.hasExpired(val, db):
+            cls.delete(key, db)
             return None
         val.updateLAT()
         return val
 
-    # Deletes a key from the store also decrements keys count in Stats.
+    # Deletes a key from the store
     @classmethod
-    def delete(cls, key: str) -> bool:
-        if key not in cls.store:
+    def delete(cls, key: str, db: int = 0) -> bool:
+        if key not in cls.stores[db]:
             return False
         
-        val = cls.store.pop(key)
-        if val in cls.expires:
-            cls.expires.pop(val)
-        Stats.decrement(0, "keys")
+        val = cls.stores[db].pop(key)
+        if val in cls.expires_list[db]:
+            cls.expires_list[db].pop(val)
 
         # Explicitly free the C-allocated memory of the value immediately
         if hasattr(val, "_val") and val._val is not None:
@@ -64,13 +65,13 @@ class Store:
         return True
     
     @classmethod
-    def setExpiry(cls, obj: RedisObject,  ex_duration_sec: int) -> None:
-        cls.expires[obj] = int(time.time()) + int(ex_duration_sec)
+    def setExpiry(cls, obj: RedisObject, ex_duration_sec: int, db: int = 0) -> None:
+        cls.expires_list[db][obj] = int(time.time()) + int(ex_duration_sec)
     
     @classmethod
-    def hasExpired(cls, obj: RedisObject) -> bool:
-        return cls.expires.get(obj, float('inf')) <= int(time.time())
+    def hasExpired(cls, obj: RedisObject, db: int = 0) -> bool:
+        return cls.expires_list[db].get(obj, float('inf')) <= int(time.time())
     
     @classmethod
-    def getExpiry(cls, obj: RedisObject) -> int:
-        return cls.expires.get(obj, -1)
+    def getExpiry(cls, obj: RedisObject, db: int = 0) -> int:
+        return cls.expires_list[db].get(obj, -1)

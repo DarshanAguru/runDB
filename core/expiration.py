@@ -6,36 +6,38 @@ logger = logging.getLogger(__name__)
 
 class Expiration:
     
-    # Samples a subset of keys and deletes those that have expired
+    # Samples a subset of keys in a database and deletes those that have expired
     @staticmethod
-    def __expireSamples() -> float:
+    def __expireSamples(db: int) -> float:
         limit = 20
         expire_count = 0
+        store = Store.stores[db]
         
-        if not Store.store:
+        if not store:
             return 0.0
 
         # Sample keys first to avoid RuntimeError: dictionary changed size during iteration
-        sampled_keys = random.sample(list(Store.store.keys()), min(limit, len(Store.store)))
+        sampled_keys = random.sample(list(store.keys()), min(limit, len(store)))
         for k in sampled_keys:
-            v = Store.store.get(k)
+            v = store.get(k)
             if v is None:
                 continue
-            if Store.hasExpired(v):
-                Store.delete(k)
+            if Store.hasExpired(v, db):
+                Store.delete(k, db)
                 expire_count += 1
 
         return expire_count / len(sampled_keys)
     
-    # Periodically samples and deletes expired keys from the store
+    # Periodically samples and deletes expired keys from all stores
     @staticmethod
     def deleteExpiredKeys() -> None:
-        frac = Expiration.__expireSamples()
-        while frac > 0.25:
-            frac = Expiration.__expireSamples()
-        
-        # Logging the number of deleted keys only if keys are deleted
-        # just for logging, no use for server logic, can be commented out.
-        val = int(frac * min(20, len(Store.store))) 
-        if val > 0:
-            logger.debug(f"Deleted {val} the expired but undeleted keys.")
+        for db in range(len(Store.stores)):
+            if not Store.stores[db]:
+                continue
+            frac = Expiration.__expireSamples(db)
+            while frac > 0.25:
+                frac = Expiration.__expireSamples(db)
+            
+            val = int(frac * min(20, len(Store.stores[db]))) 
+            if val > 0:
+                logger.debug(f"Deleted {val} expired keys from db{db}.")

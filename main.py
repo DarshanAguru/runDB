@@ -1,8 +1,9 @@
 import argparse
-from server import Server, Shutdown
+from server import Server, Shutdown, Printer
 import logging
 from config import Config
 import asyncio
+
 
 async def main_async(args):
     # Setup signal handlers
@@ -30,7 +31,7 @@ def main():
     parser.add_argument("--port", type=int, default=Config.PORT, help="Port for RunDB  │ number (default: %(default)s)")                                   
     args = parser.parse_args()
    
-    logger.info("🏃 RunDB is starting to sprint! Let's burn some memory! 🔥")
+    Printer.printRunDBHeader(args.host, args.port)
     
     try:
         asyncio.run(main_async(args))

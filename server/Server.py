@@ -9,6 +9,7 @@ from core import RESPProcessor, RedisCmd, Evaluator, FDComm, Store, Expiration
 from core.Client import Client
 from config import Config
 from .Shutdown import Shutdown, ENGINE_IDLE, ENGINE_BUSY, ENGINE_SHUTDOWN
+from .Printer import Printer
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,6 @@ class Server:
                 serverSock.bind((host, port))
                 serverSock.listen()
                 serverSock.setblocking(False) # Non-blocking for async handling
-                logger.info(f"Server Listening on {host}:{port}")
                 
                 # NOTE: Due to usage of 'epoll' system call which is linux specific,
                 # this server works in Linux environment only
@@ -264,7 +264,7 @@ class Server:
 
                         if Shutdown.is_shutdown_requested:
                             if server_registered:
-                                logger.info("Shutdown requested. Stop accepting new client connections.")
+                                Printer.printShutdownStopping()
                                 try:
                                     epoll.unregister(serverSock.fileno())
                                 except OSError:
@@ -280,7 +280,6 @@ class Server:
 
                             # If no clients are left, break the loop and finish shutdown
                             if len(Server.con_clients) == 0:
-                                logger.info("All client requests processed. Exiting server loop.")
                                 break
                         
                         await asyncio.sleep(0.01)

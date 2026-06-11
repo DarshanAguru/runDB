@@ -1,28 +1,44 @@
 from typing import List, Dict
-from collections import defaultdict
 from config import Config
 
-# Track and manage keyspace statistics across multiple Redis databases
+# Track and manage keyspace and memory statistics across multiple Redis databases
 class Stats:    
-    # Store list of stats dicts per database, mapping metric names (e.g. "keys") to their integer values
-    KeyspaceStat: List[Dict[str, int]] = [defaultdict(int) for _ in range(Config.DB_COUNT)]
-    
-    # Updates a specific metric value for a database
+
+    # Retrieves the memory usage statistics in bytes
     @classmethod
-    def updateDBstat(cls, num: int, metric: str, val: int):
-        cls.KeyspaceStat[num][metric] = val
-    
-    # Increments a database metric counter by 1
+    def getMemoryStats(cls) -> Dict[str, int]:
+        from .internals.Malloc_internal import MallocInternal
+        used = MallocInternal.zmalloc_used_memory()
+        return {
+            "used_memory": used,
+            "max_memory": Config.MEMORY_LIMIT,
+            "available_memory": Config.MEMORY_LIMIT - used
+        }
+
+    # Retrieves the keyspace statistics, including keys count, expires count, and average TTL in milliseconds
     @classmethod
-    def increment(cls, num: int, metric: str):
-        cls.KeyspaceStat[num][metric] += 1
-    
-    # Decrements a database metric counter by 1
-    @classmethod
-    def decrement(cls, num: int, metric: str):
-        cls.KeyspaceStat[num][metric] -= 1
-    
-    # Retrieves the current value of a database metric counter
-    @classmethod
-    def getDBstat(cls, num: int, metric: str) -> int:
-        return cls.KeyspaceStat[num][metric]
+    def get_keyspace_stats(cls) -> List[Dict[str, int]]:
+        from .Store import Store
+        import time
+
+        stats_list = []
+        current_time = int(time.time())
+
+        for db_idx in range(Config.DB_COUNT):
+            keys = len(Store.stores[db_idx])
+            expires = len(Store.expires_list[db_idx])
+            if expires > 0:
+                total_ttl_ms = 0
+                for obj, expiry in Store.expires_list[db_idx].items():
+                    ttl_sec = max(0, expiry - current_time)
+                    total_ttl_ms += ttl_sec * 1000
+                avg_ttl = int(total_ttl_ms / expires)
+            else:
+                avg_ttl = 0
+
+            stats_list.append({
+                "keys": keys,
+                "expires": expires,
+                "avg_ttl": avg_ttl
+            })
+        return stats_list

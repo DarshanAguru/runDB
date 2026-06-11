@@ -24,6 +24,7 @@ class Evaluator:
     def evalAndRespond(cmds: list[RedisCmd], conn: Client) -> Exception | None:
         buffer = bytearray()
         for cmd in cmds:
+            db = getattr(conn, "db", 0)
             # If transaction is active, queue the command unless it is a control command
             if hasattr(conn, 'isTrans') and conn.isTrans and cmd.cmd not in ("EXEC", "DISCARD", "MULTI"):
                 conn.cqueue.append(cmd)
@@ -32,25 +33,27 @@ class Evaluator:
                 if cmd.cmd == "PING":
                     res = Evaluator.__evalPING(cmd.args)
                 elif cmd.cmd == "SET":
-                    res = Evaluator.__evalSET(cmd.args)
+                    res = Evaluator.__evalSET(db, cmd.args)
                 elif cmd.cmd == "GET":
-                    res = Evaluator.__evalGET(cmd.args)
+                    res = Evaluator.__evalGET(db, cmd.args)
                 elif cmd.cmd == "TTL":
-                    res = Evaluator.__evalTTL(cmd.args)
+                    res = Evaluator.__evalTTL(db, cmd.args)
                 elif cmd.cmd == "DEL":
-                    res = Evaluator.__evalDEL(cmd.args)
+                    res = Evaluator.__evalDEL(db, cmd.args)
                 elif cmd.cmd == "EXPIRE":
-                    res = Evaluator.__evalEXPIRE(cmd.args)
+                    res = Evaluator.__evalEXPIRE(db, cmd.args)
                 elif cmd.cmd == "BGREWRITEAOF":
                     res = Evaluator.__evalBGREWRITEAOF(cmd.args)
                 elif cmd.cmd == "INCR":
-                    res = Evaluator.__evalINCR(cmd.args)
+                    res = Evaluator.__evalINCR(db, cmd.args)
                 elif cmd.cmd == "INFO":
                     res = Evaluator.__evalINFO(cmd.args)
                 elif cmd.cmd == "CLIENT":
                     res = Evaluator.__evalCLIENT(cmd.args)
                 elif cmd.cmd == "LATENCY":
                     res = Evaluator.__evalLATENCY(cmd.args)
+                elif cmd.cmd == "SELECT":
+                    res = Evaluator.__evalSELECT(conn, cmd.args)
                 elif cmd.cmd == "MULTI":
                     res = Evaluator.__evalMULTI(conn, cmd.args)
                 elif cmd.cmd == "EXEC":
@@ -72,9 +75,26 @@ class Evaluator:
     def __getErrorResponse(msg: str) -> bytes:
         return f"-{msg}\r\n".encode("utf-8")
 
+    # Handles SELECT command to change client database index
+    @staticmethod
+    def __evalSELECT(conn: Client, args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'select' command")
+        try:
+            db_idx = int(args[0])
+        except Exception:
+            return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
+        
+        from config import Config
+        if db_idx < 0 or db_idx >= Config.DB_COUNT:
+            return Evaluator.__getErrorResponse("ERR DB index is out of range")
+        
+        conn.db = db_idx
+        return RESP_RESPONSES.RESP_OK
+
     # Handles SET command with optional EX duration
     @staticmethod
-    def __evalSET(args: List[str]) -> bytes:
+    def __evalSET(db: int, args: List[str]) -> bytes:
         if len(args) <= 1:
             return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'set' command")
 
@@ -97,59 +117,59 @@ class Evaluator:
                 return Evaluator.__getErrorResponse("ERR syntax error")
             i += 1
 
-        Store.put(key, RedisObject(value, o_type, o_encoding), ex_duration_sec)
+        Store.put(key, RedisObject(value, o_type, o_encoding), ex_duration_sec, db)
         return RESP_RESPONSES.RESP_OK
 
     # Handles GET command with expiration check
     @staticmethod
-    def __evalGET(args: List[str]) -> bytes:
+    def __evalGET(db: int, args: List[str]) -> bytes:
         if len(args) != 1:
             return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'get' command")
         
         key = args[0]
-        val = Store.get(key)
+        val = Store.get(key, db)
 
         if val is None:
             return RESP_RESPONSES.RESP_NIL
         
-        if Store.hasExpired(val):
+        if Store.hasExpired(val, db):
             return RESP_RESPONSES.RESP_NIL
         
         return Encoder.encode(val.getValue(), bulk=True)
     
     # Returns remaining TTL for a key
     @staticmethod
-    def __evalTTL(args: List[str]) -> bytes:
+    def __evalTTL(db: int, args: List[str]) -> bytes:
         if len(args) != 1:
             return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'ttl' command")
         
         key = args[0]
-        val = Store.get(key)
+        val = Store.get(key, db)
         
         if val is None:
             return RESP_RESPONSES.RESP_MINUS_TWO
     
-        if Store.getExpiry(val) == -1:
+        if Store.getExpiry(val, db) == -1:
             return RESP_RESPONSES.RESP_MINUS_ONE
     
-        if Store.hasExpired(val):
+        if Store.hasExpired(val, db):
             return RESP_RESPONSES.RESP_MINUS_TWO
-
-        duration_sec = Store.getExpiry(val) - int(time.time())
+ 
+        duration_sec = Store.getExpiry(val, db) - int(time.time())
         return Encoder.encode(duration_sec)
     
     # Deletes keys and returns count of deleted items
     @staticmethod
-    def __evalDEL(args: List[str]) -> bytes:
+    def __evalDEL(db: int, args: List[str]) -> bytes:
         count_deleted = 0
         for key in args:
-            if Store.delete(key):
+            if Store.delete(key, db):
                 count_deleted += 1
         return Encoder.encode(count_deleted)
     
     # Sets expiration for an existing key
     @staticmethod
-    def __evalEXPIRE(args: List[str]) -> bytes:
+    def __evalEXPIRE(db: int, args: List[str]) -> bytes:
         if len(args) <= 1:
             return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'expire' command")
         
@@ -159,11 +179,11 @@ class Evaluator:
         except Exception:
             return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
         
-        val = Store.get(key)
+        val = Store.get(key, db)
         if val is None:
             return RESP_RESPONSES.RESP_ZERO
         
-        Store.setExpiry(val, ex_duration_sec)
+        Store.setExpiry(val, ex_duration_sec, db)
         return RESP_RESPONSES.RESP_ONE
     
     # Background rewrite of the AOF file
@@ -187,15 +207,15 @@ class Evaluator:
 
     # Increments the integer value of a key
     @staticmethod
-    def __evalINCR(args: List[str]) -> bytes:
+    def __evalINCR(db: int, args: List[str]) -> bytes:
         if len(args) != 1:
             return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'incr' command")
         
         key = args[0]
-        val = Store.get(key)
+        val = Store.get(key, db)
 
         if val is None:
-            Store.put(key, RedisObject("1", REDIS_OBJECT_TYPES.TYPE_STRING, REDIS_OBJECT_ENCODINGS.INT), -1)
+            Store.put(key, RedisObject("1", REDIS_OBJECT_TYPES.TYPE_STRING, REDIS_OBJECT_ENCODINGS.INT), -1, db)
             return Encoder.encode(1)
         
         if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
@@ -208,29 +228,25 @@ class Evaluator:
             i = int(val.getValue())
             i += 1
             val.val = str(i)
-            exp = Store.getExpiry(val)
-            Store.put(key, val, exp)
+            exp = Store.getExpiry(val, db)
+            Store.put(key, val, exp, db)
             return Encoder.encode(i)
         except (ValueError, TypeError):
             return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
     
     # Evaluates the INFO command to report keyspace metrics
-    # TODO: Add more details as we grow ;)
     @staticmethod
     def __evalINFO(args: List[str]) -> bytes:
-        from .internals.Malloc_internal import MemTracker
-        from config import Config
-
         info_str = "# Keyspace\r\n"
-        for i in range(len(Stats.KeyspaceStat)):
-            info_str += f"db{i}:keys={Stats.getDBstat(i, 'keys')},expires=0,avg_ttl=0\r\n"
+        keyspace_stats = Stats.get_keyspace_stats()
+        for i, db_stats in enumerate(keyspace_stats):
+            info_str += f"db{i}:keys={db_stats['keys']},expires={db_stats['expires']},avg_ttl={db_stats['avg_ttl']}\r\n"
         
         info_str += "# Memory\r\n"
-        stats = MemTracker.stats()
-        used_percentage = (stats['bytes'] / Config.MEMORY_LIMIT) * 100
-        info_str += f"used_memory:{stats['bytes']} ({used_percentage:.2f}%) \r\n"
-        info_str += f"max_memory:{Config.MEMORY_LIMIT}\r\n"
-        info_str += f"avaiable_memory:{Config.MEMORY_LIMIT - stats['bytes']} ({100 - used_percentage:.2f}%)\r\n"
+        mem_stats = Stats.getMemoryStats()
+        info_str += f"used_memory:{mem_stats['used_memory']} Bytes\r\n"
+        info_str += f"max_memory:{mem_stats['max_memory']} Bytes\r\n"
+        info_str += f"available_memory:{mem_stats['available_memory']} Bytes\r\n"
         
         return Encoder.encode(info_str, bulk=True)
     
