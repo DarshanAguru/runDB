@@ -26,13 +26,14 @@ This project was built to gain hands-on experience with:
 
 - **RESP Support**: Fully compatible with the Redis Serialization Protocol.
 - **Asynchronous Server**: High-concurrency TCP server utilizing Linux's `select.epoll` in a non-blocking single-threaded event loop.
-- **AOF Snapshotting**: Manually triggerable point-in-time state dumps to an AOF file.
+- **Multi-Database Support**: Supports configuration of multiple isolated databases via `DB_COUNT` in `config.py` and client routing using the standard `SELECT <db>` command.
+- **AOF Snapshotting**: Manually triggerable point-in-time state dumps to an AOF file, fully restoring the states across all active databases.
 - **Background Forking**: Non-blocking AOF dumping using `multiprocessing` forking.
 - **Pipelining**: Support for batching multiple commands in a single network request.
-- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, and `BGREWRITEAOF`.
+- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, `SELECT`, and `BGREWRITEAOF`.
 - **Memory Optimized**: Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently.
 - **Type Awareness**: Automatically deduces and stores object types (`STRING`) and encodings (`INT`, `EMBSTR`, `RAW`).
-- **Key Expiration**: Passive (lazy) deletion on access and active expiration strategies (random sampling) to clean up stale data.
+- **Key Expiration**: Passive (lazy) deletion on access and active expiration strategies (random sampling) to clean up stale data across all stores.
 - **Graceful Shutdown**: Traps OS termination signals, coordinates with active request executors atomically, and triggers a final AOF persistence dump before exiting cleanly.
 - **Redis Transactions**: Full transaction support with `MULTI`, `EXEC`, and `DISCARD` executing queued commands isolated per client connection.
 - **Eviction Policies**: Memory reclamation strategies to maintain a hard keys limit:
@@ -51,7 +52,11 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
   - High 4 bits: Redis Object Type (e.g., `TYPE_STRING = 0`)
   - Low 4 bits: Redis Object Encoding (e.g., `RAW = 0`, `INT = 1`, `EMBSTR = 8`)
   - Bit-packing formula: `((type & 0x0F) << 4) | (encoding & 0x0F)`
-- **Native C Allocation via `ctypes`**: To bypass Python's high object memory overhead and simulate actual C-level structures, `runDB` wraps system library memory allocations using `ctypes`. It directly binds to `libc.malloc()` and `libc.free()`, allowing manual C-level heap allocation and precise tracking of allocated bytes via `MemTracker`. Additionally, native allocations can be powered by `jemalloc` (located in the `./dll/` directory) by starting the server with preloading, ensuring low memory fragmentation just like real Redis.
+- **Native C Allocation (`zmalloc`)**: To bypass Python's high object memory overhead and simulate actual C-level structures, `runDB` implements a Redis-style native allocation subsystem via `ctypes`.
+  - It binds directly to `libc.malloc()` and `libc.free()`, prepending an 8-byte prefix size header to each allocated block.
+  - Real-time allocated memory bytes are tracked in constant time by querying the prefix size header.
+  - In Linux environments, native allocations can be powered by `jemalloc` (located in the `./dll/` directory) by starting the server with preloading, ensuring low memory fragmentation just like real Redis.
+  - For more technical details on the allocator, see [working.md](working.md).
 
 ### 2. High-Performance Eviction Strategy
 
