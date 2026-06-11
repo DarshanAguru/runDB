@@ -183,6 +183,14 @@ OK
 (printf '*1\r\n$4\r\nPING\r\n*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n*2\r\n$3\r\nGET\r\n$1\r\nk\r\n';) | nc localhost 7379
 ```
 
+### Running Tests
+
+**runDB** comes with an automated unit test suite. You can run all test suites (including RESP processor, type encoder, storage, and command evaluator tests) using the following command:
+
+```bash
+python3 tests/run_tests.py
+```
+
 ---
 
 ## Configuration
@@ -228,6 +236,10 @@ Modify `config.py` to adjust system limits:
 ## Changelog
 
 Please refer to [CHANGELOG.md](CHANGELOG.md) for details on releases and changes.
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a pull request.
 
 ## License
 
