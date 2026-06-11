@@ -63,7 +63,7 @@ To minimize the memory footprint of storing millions of keys in-memory, `RunDB` 
 
 ### 2. High-Performance Eviction Strategy
 
-- **Sampling over Shuffling**: Dict key retrieval in Python preserves insertion order. To select a random key for eviction, a naive approach would shuffle the entire key list using `random.shuffle()`, which incurs a highly inefficient $O(N)$ operation for shuffling all keys.
+- **Sampling over Shuffling**: Dict key retrieval in Python preserves insertion order. To select a random key for eviction, a naive approach would shuffle the entire key list using `random.shuffle()`, which incurs a highly inefficient `O(N)` operation for shuffling all keys.
 - `RunDB` solves this with ultra-fast sampling methods:
   - For `simple-first`, it uses `random.choice(list(store.keys()))` to instantly locate and evict a single random key.
   - For `allkeys-random`, it uses `random.sample(list(store.keys()), evict_keys_count)` to retrieve a specific sub-sample of keys to evict in a single pass, avoiding the CPU bottleneck of shuffling the entire keyspace.
