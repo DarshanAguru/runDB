@@ -60,7 +60,6 @@ To minimize the memory footprint of storing millions of keys in-memory, `runDB` 
   - It binds directly to `libc.malloc()` and `libc.free()`, prepending an 8-byte prefix size header to each allocated block.
   - Real-time allocated memory bytes are tracked in constant time by querying the prefix size header.
   - In Linux environments, native allocations can be powered by `jemalloc` (located in the `./dll/` directory) by starting the server with preloading, ensuring low memory fragmentation just like real Redis.
-  - For more technical details on the allocator, see [working.md](working.md).
 
 ### 2. High-Performance Eviction Strategy
 
