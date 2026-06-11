@@ -1,5 +1,9 @@
 # runDB
 
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/DarshanAguru/runDB/releases)
+[![License](https://img.shields.io/badge/license-BSD_3--Clause-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](#prerequisites)
+
 > [!NOTE]
 > **runDB** is a learning-focused project created to explore and understand Redis internals in simpler terms. It is intended for educational purposes and is not meant to be a production database replacement.
 
@@ -221,9 +225,13 @@ Modify `config.py` to adjust system limits:
 | `EXEC`                       | Executes all queued commands in a transaction block.                      |
 | `DISCARD`                    | Flushes all queued commands inside a transaction block.                   |
 
+## Changelog
+
+Please refer to [CHANGELOG.md](CHANGELOG.md) for details on releases and changes.
+
 ## License
 
-This repository is protected under [MIT](LICENSE) License.
+This repository is protected under the [BSD 3-Clause](LICENSE) License.
 
 ## Author
 
