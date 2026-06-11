@@ -103,28 +103,41 @@ To prevent data loss and ensure system stability upon termination:
 
 The project is structured into modular components:
 
-- **`core/`**:
-
-  - `resp.py`: Implementation of RESP protocol for decoding requests.
+- **`core/`**: Core logic and structures of the Redis-like database.
+  - `resp.py`: Implementation of the RESP protocol parser for decoding client requests.
   - `encoding.py`: RESP encoding logic and type/encoding deduction.
-  - `evaluator.py`: The command processor that handles operation logic.
-  - `redisObject.py`: Memory-optimized object representation using `__slots__` and bit-packing.
-  - `assertions.py`: Shared validation logic for Redis object types and encodings.
-  - `aof.py`: Manages point-in-time state dumps using background child processes.
-  - `store.py`: In-memory storage for key-value pairs and metadata.
-  - `expiration.py`: Manages active expiration sampling.
-  - `eviction.py`: Implements memory-reclamation strategies (`simple-first`, `allkeys-random`, `allkeys-lru`).
-  - `stats.py`: Tracks and manages keyspace statistics across multiple Redis databases.
-  - `RedisCmd.py`: Data structure representing a parsed Redis command.
-  - `FDComm.py`: Helper for non-blocking file descriptor communication.
-  - `Client.py`: Encapsulates client socket references, connection states, and transaction queues per client.
-  - `internals/`: Low-level native C-memory allocation and tracking subsystem:
-    - `Malloc.py`: Python interface providing C-memory allocation tools (`alloc_string`, `alloc_int`, etc.) via `ctypes`.
-    - `Malloc_internal.py`: Directly invokes `libc` `malloc`/`free` and implements `MemTracker` for real-time bytes allocation monitoring.
-- **`server/`**:
-
-  - `Server.py`: Contains a high-concurrency, asynchronous TCP server utilizing Linux `select.epoll`.
-- **`config.py`**: Centralized configuration for server parameters.
+  - `evaluator.py`: The command processor coordinating database read/write logic.
+  - `RedisObject.py`: Memory-optimized object representation utilizing `__slots__` and bit-packing to reduce per-object overhead.
+  - `assertions.py`: Shared validation logic validating Redis command arguments, types, and encodings.
+  - `aof.py`: Coordinates Append-Only File (AOF) storage, non-blocking snapshots, and memory recovery.
+  - `Store.py`: In-memory multi-database stores with active/lazy expirations and eviction hooks.
+  - `EvictPool.py`: Candidate pools tracking key idle times for approximated LRU memory reclamation.
+  - `eviction.py`: Selects and removes keys using the configured strategy (`simple-first`, `allkeys-random`, `allkeys-lru`).
+  - `expiration.py`: Actively purges expired keys via randomized keyspace sampling.
+  - `Stats.py`: Tracks memory usage, active connections, database keys, and average TTLs.
+  - `RedisCmd.py`: Data structure holding parsed client commands and parameters.
+  - `FDComm.py`: Buffers and processes partial TCP streams to handle network chunking.
+  - `Client.py`: Connection states, database selections, and transaction queues per connected socket client.
+  - `internals/`: Low-level C-memory allocation tracking subsystem:
+    - `Malloc.py`: High-level Python utility wrapper supplying ctypes structures allocation.
+    - `Malloc_internal.py`: Directly interacts with system `libc` `malloc`/`free` and updates the `MemTracker` allocation counters.
+- **`server/`**: Handles OS-level connections, logs, and process states.
+  - `Server.py`: Single-threaded event-loop server powered by Linux-specific `select.epoll` async sockets.
+  - `Printer.py`: Diagnostic output formatter and startup banner generator.
+  - `Shutdown.py`: Monitors process interruption signals, manages atomic thread-safety flags, and triggers shutdown dumps.
+- **`tests/`**: Automated test suite.
+  - `run_tests.py`: Discovers and executes all unit tests in the project.
+  - `test_resp.py`: Validates RESP protocol parsing, pipelining, and partial buffer states.
+  - `test_encoding.py`: Tests datatype serialization and metadata bit-packing.
+  - `test_redis_object.py`: Ensures C-level struct sizes, layouts, and slot constraints are respected.
+  - `test_store.py`: Asserts database key isolation and expiration behavior.
+  - `test_evaluator.py`: Verifies individual commands and MULTI/EXEC transaction isolation.
+- **`utils/`**: Helper utilities for benchmarking and manual storming.
+  - `set_storm.py`: Floods the database with fast continuous write requests.
+  - `set_storm_with_expiration.py`: Benchmarks lazy and active key expiration cleanup loops under load.
+  - `eviction_storm.py`: Overflows the memory capacity with large keys to verify eviction algorithms.
+  - `transaction_storm.py`: Executes concurrent transaction sequences to test transaction isolation.
+- **`config.py`**: Centralized configuration parameters (ports, memory limits, databases, eviction choices).
 
 ## Getting Started
 
