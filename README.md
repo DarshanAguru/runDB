@@ -148,16 +148,12 @@ The project is structured into modular components:
 
 ### Running the Server
 
-To start the RunDB server with default settings (standard C allocator):
+RunDB automatically performs system compatibility checks at startup, validating the Linux OS environment, `epoll` support, and native C memory allocator.
 
+#### Default Execution (Auto-detect Allocator)
+If `./dll/libjemalloc.so` is present, the server automatically loads it for native custom allocations  and sets `LD_PRELOAD` in the environment so that any spawned child processes (like AOF background forks) inherit it.
 ```bash
 python3 main.py
-```
-
-To start the server using the optimized `jemalloc` allocator:
-
-```bash
-LD_PRELOAD=./dll/libjemalloc.so python3 main.py
 ```
 
 ### Testing the Server

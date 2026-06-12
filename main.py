@@ -4,7 +4,7 @@ from server.util import Shutdown, Printer
 import logging
 from config import Config
 import asyncio
-
+import os
 
 async def main_async(args):
     # Setup signal handlers
@@ -28,19 +28,19 @@ def pre_run_check(logger):
     import sys
     import select
     
-    # 1. Check if OS is Linux
+    # Check if OS is Linux
     if not sys.platform.startswith("linux"):
         logger.error("Pre-run check failed: RunDB is compatible with Linux environments only.")
         print("Error: RunDB is compatible with Linux environments only (requires select.epoll).", file=sys.stderr)
         sys.exit(1)
         
-    # 2. Check if select.epoll is supported
+    # Check if select.epoll is supported
     if not hasattr(select, "epoll"):
         logger.error("Pre-run check failed: select.epoll is not available on this platform.")
         print("Error: select.epoll is not available on this platform.", file=sys.stderr)
         sys.exit(1)
         
-    # 3. Check if ctypes standard C library binding is working
+    # Check if ctypes standard C library binding is working
     try:
         from core.internals.Malloc_internal import libc
         if libc is None:
@@ -49,7 +49,25 @@ def pre_run_check(logger):
         logger.error(f"Pre-run check failed: Native C Allocator binding check failed. {e}")
         print(f"Error: Native C Allocator check failed. Ensure ctypes is supported and standard C library is available. Details: {e}", file=sys.stderr)
         sys.exit(1)
+    
+    # Check for Memory allocator and set the ENV variable if 'libjemalloc.so' allocator is present
+    # else use default native C allocator
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        jemalloc_path = os.path.join(base_dir, 'dll', 'libjemalloc.so')
         
+        if os.path.isfile(jemalloc_path):
+            current_preload = os.environ.get('LD_PRELOAD', '')
+            if 'libjemalloc.so' not in current_preload:
+                os.environ['LD_PRELOAD'] = jemalloc_path
+                logger.info(f"jemalloc detected. Setting LD_PRELOAD to jemalloc.so. Using jemalloc for memory management.")
+            else:
+                logger.info("jemalloc is active and preloaded. Using jemalloc for memory management.")
+        else:
+            logger.info("Using native C library (libc) for memory management.")
+    except Exception as e:
+        logger.info(f"Could not check/set jemalloc.so. {e}. Using native C allocator.")
+
     logger.info("Pre-run checks passed successfully. System matches all prerequisites (Linux, select.epoll, C-allocator).")
 
 def main():
