@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graceful Shutdown**: Traps OS termination signals to cleanly exit the event loop, serialize all in-memory keyspaces to AOF, and shut down gracefully.
 - **Large Request Handling**: Added read/write buffers in `FDComm` to handle MTU chunking and partial/large RESP command streaming.
 - **Active & Passive Expiration**: Dual-strategy expiration cleaning (passive on-access deletion + periodic active sampling cron).
-- **AOF Snapshotting & Forking**: Non-blocking database snapshot dumps using background process forking.
+- **AOF Snapshotting & Forking**: Non-blocking database snapshot dumps using background process forking, with full TTL/expiration persistence for active keys.
 
 
 ### Changed

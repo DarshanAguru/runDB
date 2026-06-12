@@ -77,5 +77,5 @@ class Printer:
     @staticmethod
     def printShutdownComplete(calories, pct_used, mem_bytes):
         print(f"        {Printer.Colors.GREEN}🏁 SYS{Printer.Colors.END}  RunDB server shutdown complete.")
-        print(f"        {Printer.Colors.GREEN}👋 SYS{Printer.Colors.END}  Bye bye! You burnt {Printer.Colors.BOLD}{calories:.2f}{Printer.Colors.END} memory calories ({pct_used:.2f}% of memory capacity used, {mem_bytes} Bytes) while running! 🏃💨")
+        print(f"        {Printer.Colors.GREEN}👋 SYS{Printer.Colors.END}  Bye bye! You burnt {Printer.Colors.BOLD}{calories:.2f}{Printer.Colors.END} memory calories ({pct_used:.2f}% of memory capacity used, {mem_bytes} Bytes) while running!🏃")
         print(f"        {Printer.Colors.BLUE}🚀 SYS{Printer.Colors.END}  See You Soon!!!\n")

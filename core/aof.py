@@ -12,11 +12,21 @@ logger = logging.getLogger(__name__)
 class AOF:
     # Dumps a single key-value pair as a SET command in RESP format
     @staticmethod
-    def dumpKey(file: io.BufferedWriter, key: str, value: RedisObject) -> None:
+    def dumpKey(file: io.BufferedWriter, key: str, value: RedisObject, db_idx: int) -> None:
+        if Store.hasExpired(value, db_idx):
+            return
         # AOF store state as a series of SET commands
         tokens = ["SET", key, str(value.getValue())]
         encoded_cmd = Encoder.encode(tokens)
         file.write(encoded_cmd)
+
+        # Check if the key has an expiry set
+        expiry = Store.getExpiry(value, db_idx)
+        if expiry != -1:
+            remaining_ttl = expiry - int(time.time())
+            if remaining_ttl > 0:
+                expire_cmd = Encoder.encode(["EXPIRE", key, str(remaining_ttl)])
+                file.write(expire_cmd)
 
     # Rewrites the entire AOF file based on current store contents
     @staticmethod
@@ -32,7 +42,7 @@ class AOF:
                     select_cmd = Encoder.encode(["SELECT", str(db_idx)])
                     file.write(select_cmd)
                     for k, val in store.items():
-                        AOF.dumpKey(file, k, val)
+                        AOF.dumpKey(file, k, val, db_idx)
             
             # Atomic swap of the AOF file
             os.replace(temp_file, Config.AOF_FILE)
