@@ -17,6 +17,7 @@ except OSError:
     # Note: if the server was started with LD_PRELOAD=./dll/libjemalloc.so,
     # the standard libc malloc/free will transparently use jemalloc.
     libc = ctypes.CDLL(util.find_library("c"))
+    logger.debug("Successfully loaded libc for native allocations!")
     allocator_name = "libc"
 
 libc.malloc.argtypes = [ctypes.c_size_t]

@@ -58,6 +58,8 @@ class RedisObject:
             struct = ctypes.cast(struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
             if struct.ptr:
                 o_type = (struct.typeEncoding >> 4) & 0x0F
+                # Since lists are stored as dynamic doubly-linked QuickLists pointing to ZipLists on the C heap,
+                # we must manually traverse and free all nodes and nested buffers to avoid memory leaks on the C side.
                 if o_type == REDIS_OBJECT_TYPES.TYPE_LIST:
                     from .internals.QuickList import QuickListStruct, QuickListNodeStruct
                     ql_struct = ctypes.cast(struct.ptr, ctypes.POINTER(QuickListStruct)).contents
@@ -66,10 +68,10 @@ class RedisObject:
                         curr_node = ctypes.cast(curr_ptr, ctypes.POINTER(QuickListNodeStruct)).contents
                         next_ptr = curr_node.next
                         if curr_node.zl:
-                            MallocInternal.zfree(curr_node.zl)
-                        MallocInternal.zfree(curr_ptr)
+                            MallocInternal.zfree(curr_node.zl) # Free the embedded ZipList
+                        MallocInternal.zfree(curr_ptr) # Free the QuickListNode struct
                         curr_ptr = next_ptr
-                    MallocInternal.zfree(struct.ptr)
+                    MallocInternal.zfree(struct.ptr) # Free the base QuickListStruct
                 else:
                     MallocInternal.zfree(struct.ptr)
             struct_ptr.free()
@@ -92,6 +94,7 @@ class RedisObject:
         # Free existing data pointer if present
         if struct.ptr:
             o_type = (struct.typeEncoding >> 4) & 0x0F
+            # Free the previous list structures manually to prevent C heap leaks before assigning a new value
             if o_type == REDIS_OBJECT_TYPES.TYPE_LIST:
                 from .internals.QuickList import QuickListStruct, QuickListNodeStruct
                 ql_struct = ctypes.cast(struct.ptr, ctypes.POINTER(QuickListStruct)).contents
@@ -100,10 +103,10 @@ class RedisObject:
                     curr_node = ctypes.cast(curr_ptr, ctypes.POINTER(QuickListNodeStruct)).contents
                     next_ptr = curr_node.next
                     if curr_node.zl:
-                        MallocInternal.zfree(curr_node.zl)
-                    MallocInternal.zfree(curr_ptr)
+                        MallocInternal.zfree(curr_node.zl) # Free the ZipList buffer
+                    MallocInternal.zfree(curr_ptr) # Free the QuickListNode struct
                     curr_ptr = next_ptr
-                MallocInternal.zfree(struct.ptr)
+                MallocInternal.zfree(struct.ptr) # Free the base QuickListStruct
             else:
                 MallocInternal.zfree(struct.ptr)
             struct.ptr = None
@@ -120,6 +123,8 @@ class RedisObject:
             struct.ptr = ptr
             struct.size = size
         elif encoding == REDIS_OBJECT_ENCODINGS.QUICKLIST:
+            # Transfer ownership of the C QuickList structure to this RedisObject.
+            # We call release() to detach Python's weakref finalizer, preventing a double-free when the Python-side QuickList wrapper is garbage collected.
             from .internals.QuickList import QuickListStruct
             struct.ptr = new_val.release()
             struct.size = ctypes.sizeof(QuickListStruct)
