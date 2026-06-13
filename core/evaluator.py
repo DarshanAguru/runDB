@@ -60,6 +60,22 @@ class Evaluator:
                     res = Evaluator.__evalEXEC(conn, cmd.args)
                 elif cmd.cmd == "DISCARD":
                     res = Evaluator.__evalDISCARD(conn, cmd.args)
+                elif cmd.cmd == "LPUSH":
+                    res = Evaluator.__evalLPUSH(db, cmd.args)
+                elif cmd.cmd == "RPUSH":
+                    res = Evaluator.__evalRPUSH(db, cmd.args)
+                elif cmd.cmd == "LPOP":
+                    res = Evaluator.__evalLPOP(db, cmd.args)
+                elif cmd.cmd == "RPOP":
+                    res = Evaluator.__evalRPOP(db, cmd.args)
+                elif cmd.cmd == "LLEN":
+                    res = Evaluator.__evalLLEN(db, cmd.args)
+                elif cmd.cmd == "LINDEX":
+                    res = Evaluator.__evalLINDEX(db, cmd.args)
+                elif cmd.cmd == "LRANGE":
+                    res = Evaluator.__evalLRANGE(db, cmd.args)
+                elif cmd.cmd == "DEBUG":
+                    res = Evaluator.__evalDEBUG(db, cmd.args)
                 else:
                     res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
             
@@ -285,5 +301,221 @@ class Evaluator:
             return Evaluator.__getErrorResponse("ERR DISCARD without MULTI")
         conn.TransDiscard()
         return b"+OK\r\n"
+
+    @staticmethod
+    def __evalLPUSH(db: int, args: List[str]) -> bytes:
+        if len(args) < 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'lpush' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is not None:
+            if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_LIST):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            ql = val.getValue()
+        else:
+            from .internals.QuickList import QuickList
+            ql = QuickList()
+            
+        for element in args[1:]:
+            ql.lpush(element.encode())
+            
+        if val is None:
+            Store.put(key, RedisObject(ql, REDIS_OBJECT_TYPES.TYPE_LIST, REDIS_OBJECT_ENCODINGS.QUICKLIST), -1, db)
+        return Encoder.encode(len(ql))
+
+    @staticmethod
+    def __evalRPUSH(db: int, args: List[str]) -> bytes:
+        if len(args) < 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'rpush' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is not None:
+            if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_LIST):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            ql = val.getValue()
+        else:
+            from .internals.QuickList import QuickList
+            ql = QuickList()
+            
+        for element in args[1:]:
+            ql.rpush(element.encode())
+            
+        if val is None:
+            Store.put(key, RedisObject(ql, REDIS_OBJECT_TYPES.TYPE_LIST, REDIS_OBJECT_ENCODINGS.QUICKLIST), -1, db)
+        return Encoder.encode(len(ql))
+
+    @staticmethod
+    def __evalLPOP(db: int, args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'lpop' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is None:
+            return RESP_RESPONSES.RESP_NIL
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_LIST):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        ql = val.getValue()
+        res = ql.lpop()
+        
+        if len(ql) == 0:
+            Store.delete(key, db)
+            
+        if res is None:
+            return RESP_RESPONSES.RESP_NIL
+        return Encoder.encode(res.decode(), bulk=True)
+
+    @staticmethod
+    def __evalRPOP(db: int, args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'rpop' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is None:
+            return RESP_RESPONSES.RESP_NIL
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_LIST):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        ql = val.getValue()
+        res = ql.rpop()
+        
+        if len(ql) == 0:
+            Store.delete(key, db)
+            
+        if res is None:
+            return RESP_RESPONSES.RESP_NIL
+        return Encoder.encode(res.decode(), bulk=True)
+
+    @staticmethod
+    def __evalLLEN(db: int, args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'llen' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is None:
+            return RESP_RESPONSES.RESP_ZERO
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_LIST):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        ql = val.getValue()
+        return Encoder.encode(len(ql))
+
+    @staticmethod
+    def __evalLINDEX(db: int, args: List[str]) -> bytes:
+        if len(args) != 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'lindex' command")
+        
+        key = args[0]
+        try:
+            idx = int(args[1])
+        except ValueError:
+            return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
+            
+        val = Store.get(key, db)
+        
+        if val is None:
+            return RESP_RESPONSES.RESP_NIL
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_LIST):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        ql = val.getValue()
+        try:
+            res = ql[idx]
+            return Encoder.encode(res.decode(), bulk=True)
+        except IndexError:
+            return RESP_RESPONSES.RESP_NIL
+
+    @staticmethod
+    def __evalLRANGE(db: int, args: List[str]) -> bytes:
+        if len(args) != 3:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'lrange' command")
+        
+        key = args[0]
+        try:
+            start = int(args[1])
+            stop = int(args[2])
+        except ValueError:
+            return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
+            
+        val = Store.get(key, db)
+        
+        if val is None:
+            return Encoder.encode([])
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_LIST):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        ql = val.getValue()
+        total = len(ql)
+        
+        if start < 0:
+            start = total + start
+        if start < 0:
+            start = 0
+            
+        if stop < 0:
+            stop = total + stop
+        if stop < 0:
+            stop = 0
+            
+        if start > stop or start >= total:
+            return Encoder.encode([])
+            
+        if stop >= total:
+            stop = total - 1
+            
+        res = []
+        for i in range(start, stop + 1):
+            res.append(ql[i].decode())
+            
+        return Encoder.encode(res)
+
+    @staticmethod
+    def __evalDEBUG(db: int, args: List[str]) -> bytes:
+        if len(args) < 2 or args[0].upper() != "OBJECT":
+            return Evaluator.__getErrorResponse("ERR unknown subcommand or wrong number of arguments for 'DEBUG'")
+        
+        key = args[1]
+        val = Store.get(key, db)
+        if val is None:
+            return Evaluator.__getErrorResponse("ERR no such key")
+            
+        struct = val.val
+        ptr_addr = struct.ptr if struct.ptr else 0
+        
+        enc = val.getEncoding()
+        if enc == REDIS_OBJECT_ENCODINGS.RAW:
+            encoding_name = "raw"
+        elif enc == REDIS_OBJECT_ENCODINGS.INT:
+            encoding_name = "int"
+        elif enc == REDIS_OBJECT_ENCODINGS.EMBSTR:
+            encoding_name = "embstr"
+        elif enc == REDIS_OBJECT_ENCODINGS.QUICKLIST:
+            encoding_name = "quicklist"
+        else:
+            encoding_name = "unknown"
+            
+        from config import Config
+        current_clock = int(time.time()) & Config.LRU_BITS_MASK
+        lru = struct.lat
+        idle = (current_clock - lru) & Config.LRU_BITS_MASK
+        
+        msg = f"Value at:0x{ptr_addr:x} refcount:1 encoding:{encoding_name} serializedlength:{struct.size} lru:{lru} lru_seconds_idle:{idle}"
+        return Encoder.encode(msg, bulk=False)
+
 
     

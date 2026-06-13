@@ -5,6 +5,15 @@ All notable changes to **RunDB** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-13
+
+### Added
+- **QuickList and ZipList Data Structures**: Implemented memory-efficient list types using doubly-linked structures (`QuickList`) of packed contiguous memory buffers (`ZipList`).
+- **Redis List Commands Support**: Added command handlers and evaluator dispatching for `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, and `LRANGE`.
+- **`DEBUG OBJECT` Command**: Added a diagnostic tool command `DEBUG OBJECT <key>` to retrieve object pointers, encoding types, serialized lengths, and LRU idle times.
+- **Double-Free Safe Ownership Handoff**: Added pointer finalizer detaching via a new `release()` mechanism in `QuickList` to safely transfer structure ownership from Python to `RedisObject` without double-free errors.
+- **List Commands Test Suite**: Added a comprehensive unit test suite in `tests/test_list_commands.py` validating command lifecycles, error states, and memory cleanups.
+
 ## [1.0.0] - 2026-06-11
 
 ### Added

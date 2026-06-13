@@ -9,12 +9,14 @@ from .internals.Malloc_internal import MallocInternal
 # Redis object type definitions
 class REDIS_OBJECT_TYPES:
     TYPE_STRING: int = 0
+    TYPE_LIST: int = 1
     
 # Redis object encoding definitions
 class REDIS_OBJECT_ENCODINGS:
     RAW: int = 0
     INT: int = 1
     EMBSTR: int = 8
+    QUICKLIST: int = 9
 
 
 class RedisObjectStruct(ctypes.Structure):
@@ -55,7 +57,21 @@ class RedisObject:
         if struct_ptr and struct_ptr.ptr:
             struct = ctypes.cast(struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
             if struct.ptr:
-                MallocInternal.zfree(struct.ptr)
+                o_type = (struct.typeEncoding >> 4) & 0x0F
+                if o_type == REDIS_OBJECT_TYPES.TYPE_LIST:
+                    from .internals.QuickList import QuickListStruct, QuickListNodeStruct
+                    ql_struct = ctypes.cast(struct.ptr, ctypes.POINTER(QuickListStruct)).contents
+                    curr_ptr = ql_struct.head
+                    while curr_ptr:
+                        curr_node = ctypes.cast(curr_ptr, ctypes.POINTER(QuickListNodeStruct)).contents
+                        next_ptr = curr_node.next
+                        if curr_node.zl:
+                            MallocInternal.zfree(curr_node.zl)
+                        MallocInternal.zfree(curr_ptr)
+                        curr_ptr = next_ptr
+                    MallocInternal.zfree(struct.ptr)
+                else:
+                    MallocInternal.zfree(struct.ptr)
             struct_ptr.free()
 
     def free(self) -> None:
@@ -75,7 +91,21 @@ class RedisObject:
         
         # Free existing data pointer if present
         if struct.ptr:
-            MallocInternal.zfree(struct.ptr)
+            o_type = (struct.typeEncoding >> 4) & 0x0F
+            if o_type == REDIS_OBJECT_TYPES.TYPE_LIST:
+                from .internals.QuickList import QuickListStruct, QuickListNodeStruct
+                ql_struct = ctypes.cast(struct.ptr, ctypes.POINTER(QuickListStruct)).contents
+                curr_ptr = ql_struct.head
+                while curr_ptr:
+                    curr_node = ctypes.cast(curr_ptr, ctypes.POINTER(QuickListNodeStruct)).contents
+                    next_ptr = curr_node.next
+                    if curr_node.zl:
+                        MallocInternal.zfree(curr_node.zl)
+                    MallocInternal.zfree(curr_ptr)
+                    curr_ptr = next_ptr
+                MallocInternal.zfree(struct.ptr)
+            else:
+                MallocInternal.zfree(struct.ptr)
             struct.ptr = None
             struct.size = 0
 
@@ -89,6 +119,10 @@ class RedisObject:
             ctypes.cast(ptr, ctypes.POINTER(ctypes.c_int32))[0] = int(new_val)
             struct.ptr = ptr
             struct.size = size
+        elif encoding == REDIS_OBJECT_ENCODINGS.QUICKLIST:
+            from .internals.QuickList import QuickListStruct
+            struct.ptr = new_val.release()
+            struct.size = ctypes.sizeof(QuickListStruct)
         else:
             if isinstance(new_val, str):
                 data = new_val.encode()
@@ -124,6 +158,9 @@ class RedisObject:
         encoding = self.getEncoding()
         if encoding == REDIS_OBJECT_ENCODINGS.INT:
             return ctypes.cast(struct.ptr, ctypes.POINTER(ctypes.c_int32))[0]
+        elif encoding == REDIS_OBJECT_ENCODINGS.QUICKLIST:
+            from .internals.QuickList import QuickList
+            return QuickList(ptr=struct.ptr)
         else:
             return ctypes.string_at(struct.ptr, struct.size - 1).decode()
     

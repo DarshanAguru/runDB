@@ -29,7 +29,7 @@ class Printer:
         # Add a friendly message
         print("""
         RUNDB: The Redis-inspired NoSQL Key-Value Store
-        Version 1.0.0 - Built with ❤️  by Darshan
+        Version 1.1.0 - Built with ❤️  by Darshan
         """)
         
         line1_text = f"Server is running at {ip}:{port}"

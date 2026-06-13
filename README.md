@@ -1,6 +1,6 @@
 # RunDB
 
-[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/DarshanAguru/runDB/releases)
+[![Version](https://img.shields.io/badge/version-v1.1.0-blue.svg)](https://github.com/DarshanAguru/runDB/releases)
 [![License](https://img.shields.io/badge/license-BSD_3--Clause-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](#prerequisites)
 
@@ -34,8 +34,8 @@ This project was built to gain hands-on experience with:
 - **AOF Snapshotting**: Manually triggerable point-in-time state dumps to an AOF file, fully restoring the states across all active databases.
 - **Background Forking**: Non-blocking AOF dumping using `multiprocessing` forking.
 - **Pipelining**: Support for batching multiple commands in a single network request.
-- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, `SELECT`, and `BGREWRITEAOF`.
-- **Memory Optimized**: Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently.
+- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, `SELECT`, `BGREWRITEAOF`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, `LRANGE`, and `DEBUG OBJECT`.
+- **Memory Optimized**: Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently. Includes support for memory-efficient Redis-style list structures via `QuickList` and `ZipList`.
 - **Type Awareness**: Automatically deduces and stores object types (`STRING`) and encodings (`INT`, `EMBSTR`, `RAW`).
 - **Key Expiration**: Passive (lazy) deletion on access and active expiration strategies (random sampling) to clean up stale data across all stores.
 - **Graceful Shutdown**: Traps OS termination signals, coordinates with active request executors atomically, and triggers a final AOF persistence dump before exiting cleanly.
@@ -121,10 +121,12 @@ The project is structured into modular components:
   - `internals/`: Low-level C-memory allocation tracking subsystem:
     - `Malloc.py`: High-level Python utility wrapper supplying ctypes structures allocation.
     - `Malloc_internal.py`: Directly interacts with system `libc` `malloc`/`free` and updates the `MemTracker` allocation counters.
+    - `QuickList.py`: Memory-efficient Redis-style quicklist and ziplist implementation.
 - **`server/`**: Handles OS-level connections, logs, and process states.
   - `Server.py`: Single-threaded event-loop server powered by Linux-specific `select.epoll` async sockets.
-  - `Printer.py`: Diagnostic output formatter and startup banner generator.
-  - `Shutdown.py`: Monitors process interruption signals, manages atomic thread-safety flags, and triggers shutdown dumps.
+  - `util/`: Helper utilities for server printing and signal coordination:
+    - `Printer.py`: Diagnostic output formatter and startup banner generator.
+    - `Shutdown.py`: Monitors process interruption signals, manages atomic thread-safety flags, and triggers shutdown dumps.
 - **`tests/`**: Automated test suite.
   - `run_tests.py`: Discovers and executes all unit tests in the project.
   - `test_resp.py`: Validates RESP protocol parsing, pipelining, and partial buffer states.
@@ -132,6 +134,9 @@ The project is structured into modular components:
   - `test_redis_object.py`: Ensures C-level struct sizes, layouts, and slot constraints are respected.
   - `test_store.py`: Asserts database key isolation and expiration behavior.
   - `test_evaluator.py`: Verifies individual commands and MULTI/EXEC transaction isolation.
+  - `test_aof.py`: Validates Append-Only File (AOF) state persistence, recovery, and passive/active expiration persistence.
+  - `test_quicklist.py`: Validates low-level ZipList entry packing/decoding and QuickList node splitting and deletions.
+  - `test_list_commands.py`: Validates list commands (`LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, `LRANGE`) and memory recycling.
 - **`testing_utils/`**: Helper utilities for benchmarking and manual storming.
   - `set_storm.py`: Floods the database with fast continuous write requests.
   - `set_storm_with_expiration.py`: Benchmarks lazy and active key expiration cleanup loops under load.
@@ -240,6 +245,14 @@ Modify `config.py` to adjust system limits:
 | `MULTI`                      | Marks the start of a transaction block.                                   |
 | `EXEC`                       | Executes all queued commands in a transaction block.                      |
 | `DISCARD`                    | Flushes all queued commands inside a transaction block.                   |
+| `LPUSH key value [value ...]` | Pushes one or more values to the head of a list.                          |
+| `RPUSH key value [value ...]` | Pushes one or more values to the tail of a list.                          |
+| `LPOP key`                    | Pops a value from the head of a list.                                     |
+| `RPOP key`                    | Pops a value from the tail of a list.                                     |
+| `LLEN key`                    | Returns the length of a list.                                             |
+| `LINDEX key index`            | Retrieves an element from a list by its index.                            |
+| `LRANGE key start stop`       | Retrieves a range of elements from a list.                                |
+| `DEBUG OBJECT key`            | Debug command displaying object memory, encoding, and access metrics.      |
 
 ## Changelog
 

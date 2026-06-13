@@ -10,15 +10,22 @@ from .encoding import Encoder
 logger = logging.getLogger(__name__)
 
 class AOF:
-    # Dumps a single key-value pair as a SET command in RESP format
+    # Dumps a single key-value pair as a SET/RPUSH command in RESP format
     @staticmethod
     def dumpKey(file: io.BufferedWriter, key: str, value: RedisObject, db_idx: int) -> None:
         if Store.hasExpired(value, db_idx):
             return
-        # AOF store state as a series of SET commands
-        tokens = ["SET", key, str(value.getValue())]
-        encoded_cmd = Encoder.encode(tokens)
-        file.write(encoded_cmd)
+        
+        from .RedisObject import REDIS_OBJECT_TYPES
+        if value.getType() == REDIS_OBJECT_TYPES.TYPE_LIST:
+            elements = list(value.getValue())
+            tokens = ["RPUSH", key] + [el.decode() for el in elements]
+            encoded_cmd = Encoder.encode(tokens)
+            file.write(encoded_cmd)
+        else:
+            tokens = ["SET", key, str(value.getValue())]
+            encoded_cmd = Encoder.encode(tokens)
+            file.write(encoded_cmd)
 
         # Check if the key has an expiry set
         expiry = Store.getExpiry(value, db_idx)
