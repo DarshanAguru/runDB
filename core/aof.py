@@ -12,18 +12,21 @@ logger = logging.getLogger(__name__)
 class AOF:
     # Dumps a single key-value pair as a SET/RPUSH command in RESP format
     @staticmethod
-    def dumpKey(file: io.BufferedWriter, key: str, value: RedisObject, db_idx: int) -> None:
+    def dumpKey(file: io.BufferedWriter, key: str, value: int, db_idx: int) -> None:
         if Store.hasExpired(value, db_idx):
             return
         
+        # Wrap the raw pointer in a temporary RedisObject wrapper
+        robj = RedisObject(ptr=value)
+        
         from .RedisObject import REDIS_OBJECT_TYPES
-        if value.getType() == REDIS_OBJECT_TYPES.TYPE_LIST:
-            elements = list(value.getValue())
+        if robj.getType() == REDIS_OBJECT_TYPES.TYPE_LIST:
+            elements = list(robj.getValue())
             tokens = ["RPUSH", key] + [el.decode() for el in elements]
             encoded_cmd = Encoder.encode(tokens)
             file.write(encoded_cmd)
         else:
-            tokens = ["SET", key, str(value.getValue())]
+            tokens = ["SET", key, str(robj.getValue())]
             encoded_cmd = Encoder.encode(tokens)
             file.write(encoded_cmd)
 

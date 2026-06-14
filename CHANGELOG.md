@@ -8,11 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.0] - 2026-06-13
 
 ### Added
+- **C-Heap Open-Addressing HashMap**: Implemented a native, open-addressing Hash Map on the C heap utilizing FNV-1a hashing and tombstoning, completely eliminating Python `dict` overhead from core database storage.
+- **Intset and HashTable Upgradeable Sets**: Implemented Redis-style Sets that start as contiguous integer-sorted arrays (`Intset`) and automatically upgrade to C-heap Hash Tables (`HashTable`) when non-integer values are inserted or size thresholds are exceeded.
+- **Redis Set Commands Support**: Added command handlers and evaluator dispatching for `SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SRANDMEMBER`, and `SREM`.
 - **QuickList and ZipList Data Structures**: Implemented memory-efficient list types using doubly-linked structures (`QuickList`) of packed contiguous memory buffers (`ZipList`).
 - **Redis List Commands Support**: Added command handlers and evaluator dispatching for `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, and `LRANGE`.
 - **`DEBUG OBJECT` Command**: Added a diagnostic tool command `DEBUG OBJECT <key>` to retrieve object pointers, encoding types, serialized lengths, and LRU idle times.
-- **Double-Free Safe Ownership Handoff**: Added pointer finalizer detaching via a new `release()` mechanism in `QuickList` to safely transfer structure ownership from Python to `RedisObject` without double-free errors.
-- **List Commands Test Suite**: Added a comprehensive unit test suite in `tests/test_list_commands.py` validating command lifecycles, error states, and memory cleanups.
+- **Double-Free Safe Ownership Handoff**: Added pointer finalizer detaching via a new `release()` mechanism in `QuickList`, `Set`, and `RedisObject` to safely transfer structure ownership from Python to `RedisObject` without double-free errors.
+- **Comprehensive Set & List Test Suites**: Added new automated unit tests in `tests/test_set.py` and `tests/test_list_commands.py` validating command lifecycles, encodings, and memory recycling.
 
 ## [1.0.0] - 2026-06-11
 

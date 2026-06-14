@@ -84,7 +84,6 @@ class TestEvaluator(unittest.TestCase):
 
     def test_del(self):
         # Set a key
-        Store.put("k", None, -1) # Wait, RedisObject needs to be created
         from core.RedisObject import RedisObject, REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
         obj = RedisObject("v", REDIS_OBJECT_TYPES.TYPE_STRING, REDIS_OBJECT_ENCODINGS.EMBSTR)
         Store.put("k", obj, -1)

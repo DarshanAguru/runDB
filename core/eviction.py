@@ -48,7 +48,7 @@ class Eviction:
             return
         keys = random.sample(list(store.keys()), min(count, len(store)))
         for key in keys:
-            obj = store.get(key)
+            obj = Store.get(key, db)
             if obj is not None:
                 # Add key and its last accessed timestamp (LAT) to the eviction pool
                 EvictPool.add(key, obj.getLAT())
@@ -73,7 +73,7 @@ class Eviction:
                 continue
             
             # Retrieve object from store to check for stale/already deleted pool entries
-            obj = store.get(item.key)
+            obj = Store.get(item.key, db)
 
             # Skip if the key is stale (already deleted or expired)
             if obj is None:

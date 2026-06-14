@@ -74,6 +74,18 @@ class Evaluator:
                     res = Evaluator.__evalLINDEX(db, cmd.args)
                 elif cmd.cmd == "LRANGE":
                     res = Evaluator.__evalLRANGE(db, cmd.args)
+                elif cmd.cmd == "SADD":
+                    res = Evaluator.__evalSADD(db, cmd.args)
+                elif cmd.cmd == "SREM":
+                    res = Evaluator.__evalSREM(db, cmd.args)
+                elif cmd.cmd == "SISMEMBER":
+                    res = Evaluator.__evalSISMEMBER(db, cmd.args)
+                elif cmd.cmd == "SMEMBERS":
+                    res = Evaluator.__evalSMEMBERS(db, cmd.args)
+                elif cmd.cmd == "SCARD":
+                    res = Evaluator.__evalSCARD(db, cmd.args)
+                elif cmd.cmd == "SRANDMEMBER":
+                    res = Evaluator.__evalSRANDMEMBER(db, cmd.args)
                 elif cmd.cmd == "DEBUG":
                     res = Evaluator.__evalDEBUG(db, cmd.args)
                 else:
@@ -506,6 +518,10 @@ class Evaluator:
             encoding_name = "embstr"
         elif enc == REDIS_OBJECT_ENCODINGS.QUICKLIST:
             encoding_name = "quicklist"
+        elif enc == REDIS_OBJECT_ENCODINGS.INTSET:
+            encoding_name = "intset"
+        elif enc == REDIS_OBJECT_ENCODINGS.HT:
+            encoding_name = "hashtable"
         else:
             encoding_name = "unknown"
             
@@ -516,6 +532,198 @@ class Evaluator:
         
         msg = f"Value at:0x{ptr_addr:x} refcount:1 encoding:{encoding_name} serializedlength:{struct.size} lru:{lru} lru_seconds_idle:{idle}"
         return Encoder.encode(msg, bulk=False)
+
+    @staticmethod
+    def __evalSADD(db: int, args: List[str]) -> bytes:
+        if len(args) < 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'sadd' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is not None:
+            if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_SET):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            s = val.getValue()
+        else:
+            from .internals.Set import Set
+            s = Set()
+            
+        added_count = 0
+        for element in args[1:]:
+            try:
+                if element == "0" or (element.startswith("-") and element[1:].isdigit() and element[1] != "0") or (element.isdigit() and element[0] != "0"):
+                    parsed = int(element)
+                else:
+                    parsed = element
+            except ValueError:
+                parsed = element
+                
+            if s.add(parsed):
+                added_count += 1
+                
+        if val is None:
+            Store.put(key, RedisObject(s, REDIS_OBJECT_TYPES.TYPE_SET, s.encoding), -1, db)
+        else:
+            struct = val.val
+            old_enc = val.getEncoding()
+            if old_enc != s.encoding:
+                struct.typeEncoding = ((REDIS_OBJECT_TYPES.TYPE_SET & 0x0F) << 4) | (s.encoding & 0x0F)
+                struct.ptr = s.release()
+                struct.size = s.underlying.map.size
+            else:
+                struct.ptr = s.release()
+                struct.size = s.underlying.size if s.encoding == 11 else s.underlying.map.size
+            Store.put(key, val, Store.getExpiry(val, db), db)
+            
+        return Encoder.encode(added_count)
+
+    @staticmethod
+    def __evalSREM(db: int, args: List[str]) -> bytes:
+        if len(args) < 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'srem' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is None:
+            return RESP_RESPONSES.RESP_ZERO
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_SET):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        s = val.getValue()
+        removed_count = 0
+        for element in args[1:]:
+            try:
+                if element == "0" or (element.startswith("-") and element[1:].isdigit() and element[1] != "0") or (element.isdigit() and element[0] != "0"):
+                    parsed = int(element)
+                else:
+                    parsed = element
+            except ValueError:
+                parsed = element
+                
+            if s.remove(parsed):
+                removed_count += 1
+                
+        if len(s) == 0:
+            Store.delete(key, db)
+        else:
+            struct = val.val
+            struct.ptr = s.release()
+            struct.size = s.underlying.size if s.encoding == 11 else s.underlying.map.size
+            Store.put(key, val, Store.getExpiry(val, db), db)
+            
+        return Encoder.encode(removed_count)
+
+    @staticmethod
+    def __evalSISMEMBER(db: int, args: List[str]) -> bytes:
+        if len(args) != 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'sismember' command")
+        
+        key = args[0]
+        member = args[1]
+        val = Store.get(key, db)
+        
+        if val is None:
+            return RESP_RESPONSES.RESP_ZERO
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_SET):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        s = val.getValue()
+        try:
+            if member == "0" or (member.startswith("-") and member[1:].isdigit() and member[1] != "0") or (member.isdigit() and member[0] != "0"):
+                parsed = int(member)
+            else:
+                parsed = member
+        except ValueError:
+            parsed = member
+            
+        if parsed in s:
+            return RESP_RESPONSES.RESP_ONE
+        else:
+            return RESP_RESPONSES.RESP_ZERO
+
+    @staticmethod
+    def __evalSMEMBERS(db: int, args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'smembers' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is None:
+            return Encoder.encode([])
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_SET):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        s = val.getValue()
+        members = [str(m) for m in s]
+        return Encoder.encode(members)
+
+    @staticmethod
+    def __evalSCARD(db: int, args: List[str]) -> bytes:
+        if len(args) != 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'scard' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        if val is None:
+            return RESP_RESPONSES.RESP_ZERO
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_SET):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        s = val.getValue()
+        return Encoder.encode(len(s))
+
+    @staticmethod
+    def __evalSRANDMEMBER(db: int, args: List[str]) -> bytes:
+        if len(args) < 1 or len(args) > 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'srandmember' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        has_count = len(args) == 2
+        count = 0
+        if has_count:
+            try:
+                count = int(args[1])
+            except ValueError:
+                return Evaluator.__getErrorResponse("ERR value is not an integer or is out of range")
+                
+        if val is None:
+            return RESP_RESPONSES.RESP_NIL if not has_count else Encoder.encode([])
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_SET):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        s = val.getValue()
+        if len(s) == 0:
+            return RESP_RESPONSES.RESP_NIL if not has_count else Encoder.encode([])
+            
+        if not has_count:
+            res = s.get_random_member()
+            return Encoder.encode(str(res), bulk=True)
+        else:
+            res = []
+            if count >= 0:
+                count = min(count, len(s))
+                members = list(s)
+                import random
+                sampled = random.sample(members, count)
+                res = [str(m) for m in sampled]
+            else:
+                count = abs(count)
+                members = list(s)
+                import random
+                for _ in range(count):
+                    res.append(str(random.choice(members)))
+            return Encoder.encode(res)
 
 
     
