@@ -339,14 +339,134 @@ class ZipList:
         if isinstance(data, str):
             data = data.encode()
             
-        zlbytes, _, zllen = self._read_header()
-        # Determine the insertion index based on target offset (head, tail, or middle)
+        zlbytes, zltail, zllen = self._read_header()
+        
+        # Calculate prev_len for the new entry
         if offset == ZipListHelper.ZL_HEADER_SIZE:
-            idx = 0
-        elif offset == zlbytes - 1:
-            idx = zllen
+            prev_len = 0
         else:
-            # Linear scan to find entry index matching target byte offset
+            if offset == zlbytes - 1:
+                # We are appending at the end; prev_len is the length of the tail entry
+                if zllen == 0:
+                    prev_len = 0
+                else:
+                    _, tail_prev_len_enc_len = ZipListHelper.decode_prev_len(self.ptr, zltail)
+                    _, tail_payload_len = ZipListHelper.decode_entry_payload(self.ptr, zltail + tail_prev_len_enc_len)
+                    prev_len = tail_prev_len_enc_len + tail_payload_len
+            else:
+                prev_len, _ = ZipListHelper.decode_prev_len(self.ptr, offset)
+
+        # Encode the new entry
+        enc_prev = ZipListHelper.encode_prev_len(prev_len)
+        enc_enc, enc_data = ZipListHelper.encode_entry_payload(data)
+        new_entry_bytes = enc_prev + enc_enc + enc_data
+        new_entry_len = len(new_entry_bytes)
+
+        # Check if we can do memmove or need rebuild
+        use_memmove = False
+        if offset == zlbytes - 1:
+            use_memmove = True
+        else:
+            _, curr_next_prev_len_bytes = ZipListHelper.decode_prev_len(self.ptr, offset)
+            new_next_prev_len_bytes = 1 if new_entry_len < ZipListHelper.PREV_LEN_LARGER_SIZE_MARKER else 5
+            if curr_next_prev_len_bytes == new_next_prev_len_bytes:
+                use_memmove = True
+
+        if use_memmove:
+            # Resize the memory block to accommodate the new entry
+            self._resize(zlbytes + new_entry_len)
+            
+            if offset == zlbytes - 1:
+                # Appending at the end
+                ctypes.memmove(self.ptr + offset, new_entry_bytes, new_entry_len)
+                ctypes.cast(self.ptr + offset + new_entry_len, ctypes.POINTER(ctypes.c_uint8))[0] = ZipListHelper.END_MARKER
+                
+                # Update headers
+                new_zltail = offset
+                self._write_header(zlbytes + new_entry_len, new_zltail, zllen + 1)
+            else:
+                # Inserting in the middle or head
+                # Shift elements starting from offset to the right by new_entry_len
+                ctypes.memmove(self.ptr + offset + new_entry_len, self.ptr + offset, zlbytes - offset)
+                # Write the new entry
+                ctypes.memmove(self.ptr + offset, new_entry_bytes, new_entry_len)
+                # Update next entry's prev_len
+                enc_new_prev = ZipListHelper.encode_prev_len(new_entry_len)
+                ctypes.memmove(self.ptr + offset + new_entry_len, enc_new_prev, len(enc_new_prev))
+                
+                # Update headers
+                new_zltail = zltail + new_entry_len
+                self._write_header(zlbytes + new_entry_len, new_zltail, zllen + 1)
+        else:
+            # Fallback to rebuild
+            # Determine the insertion index based on target offset (head, tail, or middle)
+            if offset == ZipListHelper.ZL_HEADER_SIZE:
+                idx = 0
+            else:
+                idx = None
+                curr = ZipListHelper.ZL_HEADER_SIZE
+                for i in range(zllen):
+                    if curr == offset:
+                        idx = i
+                        break
+                    curr = self._next_entry_offset(curr)
+                if idx is None:
+                    raise IndexError("Offset not found in ziplist")
+            elements = list(self)
+            elements.insert(idx, data)
+            self._rebuild(elements)
+
+    def delete_at_offset(self, offset: int):
+        zlbytes, zltail, zllen = self._read_header()
+        if zllen == 0 or offset is None or offset >= zlbytes - 1:
+            return
+            
+        # Calculate size of the entry to delete
+        _, prev_len_enc_len = ZipListHelper.decode_prev_len(self.ptr, offset)
+        _, payload_len = ZipListHelper.decode_entry_payload(self.ptr, offset + prev_len_enc_len)
+        entry_len = prev_len_enc_len + payload_len
+        
+        # Check if we can do memmove or need rebuild
+        use_memmove = False
+        if offset == zltail:
+            use_memmove = True
+        else:
+            # There is a next entry at offset + entry_len
+            _, curr_next_prev_len_bytes = ZipListHelper.decode_prev_len(self.ptr, offset + entry_len)
+            prev_len_of_deleted, _ = ZipListHelper.decode_prev_len(self.ptr, offset)
+            new_next_prev_len_bytes = 1 if prev_len_of_deleted < 254 else 5
+            if curr_next_prev_len_bytes == new_next_prev_len_bytes:
+                use_memmove = True
+                
+        if use_memmove:
+            if offset == zltail:
+                # Deleting the tail entry
+                # Write the end marker at offset
+                ctypes.cast(self.ptr + offset, ctypes.POINTER(ctypes.c_uint8))[0] = ZipListHelper.END_MARKER
+                # Find new tail
+                if zllen <= 1:
+                    new_zltail = ZipListHelper.ZL_HEADER_SIZE
+                else:
+                    new_zltail = self._prev_entry_offset(offset)
+                self._write_header(zlbytes - entry_len, new_zltail, zllen - 1)
+            else:
+                # Deleting a middle or head entry
+                # Read prev_len of the deleted entry before shifting
+                prev_len_of_deleted, _ = ZipListHelper.decode_prev_len(self.ptr, offset)
+                # Shift elements after the deleted entry to the left by entry_len
+                ctypes.memmove(self.ptr + offset, self.ptr + offset + entry_len, zlbytes - (offset + entry_len))
+                # Update next entry's prev_len (now at offset)
+                enc_new_prev = ZipListHelper.encode_prev_len(prev_len_of_deleted)
+                ctypes.memmove(self.ptr + offset, enc_new_prev, len(enc_new_prev))
+                
+                # Update headers
+                new_zltail = zltail - entry_len
+                self._write_header(zlbytes - entry_len, new_zltail, zllen - 1)
+            
+            # Shrink memory block
+            self._resize(zlbytes - entry_len)
+        else:
+            # Fallback to rebuild
             idx = None
             curr = ZipListHelper.ZL_HEADER_SIZE
             for i in range(zllen):
@@ -354,32 +474,10 @@ class ZipList:
                     idx = i
                     break
                 curr = self._next_entry_offset(curr)
-            if idx is None:
-                raise IndexError("Offset not found in ziplist")
-                
-        # Rebuild layout: deserialize elements, insert at index, and serialize back to contiguous C bytes
-        elements = list(self)
-        elements.insert(idx, data)
-        self._rebuild(elements)
-
-    def delete_at_offset(self, offset: int):
-        zlbytes, _, zllen = self._read_header()
-        if zllen == 0 or offset is None or offset >= zlbytes - 1:
-            return
-            
-        idx = None
-        curr = ZipListHelper.ZL_HEADER_SIZE
-        for i in range(zllen):
-            if curr == offset:
-                idx = i
-                break
-            curr = self._next_entry_offset(curr)
-        if idx is None:
-            return
-            
-        elements = list(self)
-        elements.pop(idx)
-        self._rebuild(elements)
+            if idx is not None:
+                elements = list(self)
+                elements.pop(idx)
+                self._rebuild(elements)
 
     def lpush(self, data: bytes):
         self.insert_at_offset(ZipListHelper.ZL_HEADER_SIZE, data)
