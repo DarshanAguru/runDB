@@ -1,6 +1,10 @@
 from typing import Any
 from .RedisObject import REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
 
+# Encoder handles data serialization and type deduction:
+# - RESP Serialization: Encodes integers, arrays, simple strings, and bulk strings into standard RESP bytes.
+# - Type Deduction: Inspects values to identify optimal Redis Object types and encodings (e.g. using
+#   INT for parseable numbers, EMBSTR for strings <= 44 bytes, or RAW for longer strings).
 class Encoder:
     # Encodes data into RESP format based on type and flags
     @staticmethod

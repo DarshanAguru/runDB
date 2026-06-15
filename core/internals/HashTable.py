@@ -1,6 +1,8 @@
 from .HashMap import HashMap
 from typing import Any
 
+# HashTable wraps a native open-addressing C-heap HashMap to act as a Set.
+# Key type is dynamic, mapped to a dummy int32 value.
 class HashTable:
     def __init__(self, keyType: str = "string", ptr=None):
         # HashTable representing a Set maps keys to a dummy int32 value

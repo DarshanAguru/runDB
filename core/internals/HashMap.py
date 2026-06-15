@@ -10,8 +10,34 @@ class HashMapStruct(ctypes.Structure):
         ("count", ctypes.c_uint32),
     ]
 
+# HashMap Helper provides FNV-1a hashing and state flag definitions:
+# - FNV-1a: 32-bit offset/prime hashing provides fast, well-distributed keyspace dispersion.
+# - Open Addressing & Linear Probing: Resolves slot collisions by incrementing slots sequentially.
+# - Tombstoning: State flags (EMPTY, OCCUPIED, TOMBSTONE) allow deleting keys without breaking 
+#   the search/probing sequence of subsequently inserted keys.
+class HashMapHelper:
+    DEFAULT_CAPACITY = 16
+    CAPACITY_INC_THRESHOLD = 0.7
+    
+    EMPTY_STATE = 0
+    OCCUPIED_STATE = 1
+    TOMBSTONE_STATE = 2
+
+    FNV1A_OFFSET = 2166136261 
+    FNV1A_PRIME = 16777619
+    MASK_INT32 = 0xFFFFFFFF
+
+    @staticmethod
+    def hashKey(key_bytes: bytes):
+        h = HashMapHelper.FNV1A_OFFSET
+        for b in key_bytes:
+            h ^= b
+            h = ( h * HashMapHelper.FNV1A_PRIME) & HashMapHelper.MASK_INT32
+        return h
+
 class HashMap:
     def __init__(self, keyType: str, valType: str, ptr=None):
+        # Maps existing memory if pointer is supplied, otherwise allocates new zero-filled block
         self.keyType = self._get_type(keyType)
         self.valType = self._get_type(valType)
         self._bucket_class = self._make_bucket_class(self.keyType, self.valType)
@@ -22,7 +48,7 @@ class HashMap:
             struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(HashMapStruct)).contents
             self.size = ctypes.sizeof(HashMapStruct) + struct_obj.capacity * ctypes.sizeof(self._bucket_class)
         else:
-            capacity = 16
+            capacity = HashMapHelper.DEFAULT_CAPACITY
             self.size = self._get_size(keyType, valType, capacity)
             self.ptr = MallocInternal.zcalloc(self.size)
             struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(HashMapStruct)).contents
@@ -42,6 +68,7 @@ class HashMap:
 
     @staticmethod
     def _cleanup(ptr, size, free_keys, free_vals, bucket_class):
+        # Deallocates dynamically allocated string keys and values before freeing the table itself
         if not ptr:
             return
         
@@ -55,7 +82,7 @@ class HashMap:
             for i in range(capacity):
                 b_ptr = ptr + header_size + i * bucket_size
                 bucket = ctypes.cast(b_ptr, ctypes.POINTER(bucket_class)).contents
-                if bucket.state == 1:  # Occupied
+                if bucket.state == HashMapHelper.OCCUPIED_STATE:  # Occupied
                     if free_keys and bucket.key:
                         MallocInternal.zfree(bucket.key)
                     if free_vals and bucket.val:
@@ -68,6 +95,7 @@ class HashMap:
             self._finalizer()
 
     def release(self) -> int:
+        # Detaches finalizer to transfer ownership of the allocated C structure to the caller
         self.has_ownership = False
         if hasattr(self, "_finalizer") and self._finalizer.alive:
             self._finalizer.detach()
@@ -89,7 +117,7 @@ class HashMap:
     def _make_bucket_class(self, k_ctype, v_ctype):
         class Bucket(ctypes.Structure):
             _fields_ = [
-                ("state", ctypes.c_uint8),  # 0 = empty, 1 = occupied, 2 = tombstone
+                ("state", ctypes.c_uint8),
                 ("key", k_ctype),
                 ("val", v_ctype)
             ]
@@ -123,12 +151,7 @@ class HashMap:
         else:
             key_bytes = str(key).encode()
         
-        # FNV-1a 32-bit
-        h = 2166136261
-        for b in key_bytes:
-            h ^= b
-            h = (h * 16777619) & 0xFFFFFFFF
-        return h
+        return HashMapHelper.hashKey(key_bytes)
 
     def _get_bucket(self, index: int):
         header_size = ctypes.sizeof(HashMapStruct)
@@ -161,6 +184,7 @@ class HashMap:
             return val_field
 
     def _encode_key(self, key) -> tuple[Any, int]:
+        # For string types, copies Python string bytes into native C-heap memory block (+1 for null-terminator)
         if self.keyType == ctypes.c_void_p:
             b = key.encode() if isinstance(key, str) else key
             size = len(b) + 1
@@ -189,7 +213,7 @@ class HashMap:
         struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(HashMapStruct)).contents
         
         # Check load factor and resize if needed
-        if (struct_obj.count + 1) / struct_obj.capacity > 0.7:
+        if ( (struct_obj.count + 1) / struct_obj.capacity ) > HashMapHelper.CAPACITY_INC_THRESHOLD:
             self._resize(struct_obj.capacity * 2)
             struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(HashMapStruct)).contents
             
@@ -197,12 +221,13 @@ class HashMap:
         capacity = struct_obj.capacity
         slot = h % capacity
         
+        # Implements open-addressing insert with linear probing, inserting at first encountered tombstone or empty slot
         first_tombstone_slot = None
         
         while True:
             bucket = self._get_bucket(slot)
             
-            if bucket.state == 0:  # Empty
+            if bucket.state == HashMapHelper.EMPTY_STATE:
                 target_slot = first_tombstone_slot if first_tombstone_slot is not None else slot
                 target_bucket = self._get_bucket(target_slot)
                 
@@ -215,7 +240,7 @@ class HashMap:
                 struct_obj.count += 1
                 return
                 
-            elif bucket.state == 1:  # Occupied
+            elif bucket.state == HashMapHelper.OCCUPIED_STATE:
                 b_key = self._decode_key(bucket.key)
                 if b_key == key:
                     if self.valType == ctypes.c_void_p and bucket.val:
@@ -224,7 +249,7 @@ class HashMap:
                     bucket.val = enc_val
                     return
                     
-            elif bucket.state == 2:  # Tombstone
+            elif bucket.state == HashMapHelper.TOMBSTONE_STATE:
                 if first_tombstone_slot is None:
                     first_tombstone_slot = slot
                     
@@ -243,9 +268,9 @@ class HashMap:
         while True:
             bucket = self._get_bucket(slot)
             
-            if bucket.state == 0:
+            if bucket.state == HashMapHelper.EMPTY_STATE:
                 return default
-            elif bucket.state == 1:
+            elif bucket.state == HashMapHelper.OCCUPIED_STATE:
                 b_key = self._decode_key(bucket.key)
                 if b_key == key:
                     return self._decode_val(bucket.val)
@@ -268,9 +293,9 @@ class HashMap:
         while True:
             bucket = self._get_bucket(slot)
             
-            if bucket.state == 0:
+            if bucket.state == HashMapHelper.EMPTY_STATE:
                 return False
-            elif bucket.state == 1:
+            elif bucket.state == HashMapHelper.OCCUPIED_STATE:
                 b_key = self._decode_key(bucket.key)
                 if b_key == key:
                     if self.keyType == ctypes.c_void_p and bucket.key:
@@ -285,7 +310,7 @@ class HashMap:
                     else:
                         bucket.val = 0
                     
-                    bucket.state = 2  # Tombstone
+                    bucket.state = HashMapHelper.TOMBSTONE_STATE
                     struct_obj.count -= 1
                     return True
             
@@ -299,12 +324,12 @@ class HashMap:
         capacity = struct_obj.capacity
         for i in range(capacity):
             bucket = self._get_bucket(i)
-            if bucket.state == 1:
+            if bucket.state == HashMapHelper.OCCUPIED_STATE:
                 if self.keyType == ctypes.c_void_p and bucket.key:
                     MallocInternal.zfree(bucket.key)
                 if self.valType == ctypes.c_void_p and bucket.val:
                     MallocInternal.zfree(bucket.val)
-            bucket.state = 0
+            bucket.state = HashMapHelper.EMPTY_STATE
             if self.keyType == ctypes.c_void_p:
                 bucket.key = None
             else:
@@ -316,6 +341,7 @@ class HashMap:
         struct_obj.count = 0
 
     def _resize(self, new_capacity: int):
+        # Doubles table size, rehashes all occupied entries, and configures new weakref cleanup finalizer
         bucket_size = ctypes.sizeof(self._bucket_class)
         new_size = ctypes.sizeof(HashMapStruct) + new_capacity * bucket_size
         new_ptr = MallocInternal.zcalloc(new_size)
@@ -330,15 +356,15 @@ class HashMap:
         header_size = ctypes.sizeof(HashMapStruct)
         for i in range(old_capacity):
             old_bucket = self._get_bucket(i)
-            if old_bucket.state == 1:
+            if old_bucket.state == HashMapHelper.OCCUPIED_STATE:
                 key_val = self._decode_key(old_bucket.key)
                 h = self._hash(key_val)
                 slot = h % new_capacity
                 while True:
                     new_b_ptr = new_ptr + header_size + slot * bucket_size
                     new_bucket = ctypes.cast(new_b_ptr, ctypes.POINTER(self._bucket_class)).contents
-                    if new_bucket.state == 0:
-                        new_bucket.state = 1
+                    if new_bucket.state == HashMapHelper.EMPTY_STATE:
+                        new_bucket.state = HashMapHelper.OCCUPIED_STATE
                         new_bucket.key = old_bucket.key
                         new_bucket.val = old_bucket.val
                         new_header.count += 1
@@ -380,9 +406,9 @@ class HashMap:
         while True:
             bucket = self._get_bucket(slot)
             
-            if bucket.state == 0:
+            if bucket.state == HashMapHelper.EMPTY_STATE:
                 return False
-            elif bucket.state == 1:
+            elif bucket.state == HashMapHelper.OCCUPIED_STATE:
                 b_key = self._decode_key(bucket.key)
                 if b_key == key:
                     return True
@@ -397,7 +423,7 @@ class HashMap:
         capacity = struct_obj.capacity
         for i in range(capacity):
             bucket = self._get_bucket(i)
-            if bucket.state == 1:
+            if bucket.state == HashMapHelper.OCCUPIED_STATE:
                 yield self._decode_key(bucket.key)
 
     def keys(self) -> list:
@@ -409,7 +435,7 @@ class HashMap:
         res = []
         for i in range(capacity):
             bucket = self._get_bucket(i)
-            if bucket.state == 1:
+            if bucket.state == HashMapHelper.OCCUPIED_STATE:
                 res.append(self._decode_val(bucket.val))
         return res
 
@@ -419,7 +445,7 @@ class HashMap:
         res = []
         for i in range(capacity):
             bucket = self._get_bucket(i)
-            if bucket.state == 1:
+            if bucket.state == HashMapHelper.OCCUPIED_STATE:
                 res.append((self._decode_key(bucket.key), self._decode_val(bucket.val)))
         return res
 
@@ -443,7 +469,7 @@ class HashMap:
         capacity = struct_obj.capacity
         for i in range(capacity):
             bucket = self._get_bucket(i)
-            if bucket.state == 1:
+            if bucket.state == HashMapHelper.OCCUPIED_STATE:
                 return self._decode_key(bucket.key)
         raise KeyError("HashMap is empty")
 
@@ -454,6 +480,6 @@ class HashMap:
         capacity = struct_obj.capacity
         for i in range(capacity):
             bucket = self._get_bucket(i)
-            if bucket.state == 1:
+            if bucket.state == HashMapHelper.OCCUPIED_STATE:
                 return self._decode_key(bucket.key), self._decode_val(bucket.val)
         raise KeyError("HashMap is empty")

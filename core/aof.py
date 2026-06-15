@@ -9,6 +9,10 @@ from .encoding import Encoder
 
 logger = logging.getLogger(__name__)
 
+# AOF (Append Only File) persistence module:
+# - Serialization/Restoration: Serializes in-memory objects to standard RESP commands (SET, RPUSH, EXPIRE).
+# - Atomic Swap: Writes snapshot to a temporary file (AOF_FILE.tmp) and uses os.replace for an atomic swap.
+# - Replay Engine: Decodes AOF RESP commands using RESPProcessor and evaluates them directly into the Store.
 class AOF:
     # Dumps a single key-value pair as a SET/RPUSH command in RESP format
     @staticmethod

@@ -1,6 +1,11 @@
 from typing import Any
 
 
+# RESPProcessor implements the parser for the REdis Serialization Protocol (RESP):
+# - Dispatch Decoding: Branches parsing based on the initial prefix byte (+ for simple strings, 
+#   - for errors, : for integers, $ for bulk strings, * for arrays).
+# - Partial Stream Support: Catches IndexErrors during parsing of incomplete/fragmented payloads,
+#   returning successfully parsed command values and offset for next read iteration.
 class RESPProcessor:
     # Parses the length of a RESP bulk string or array
     @staticmethod

@@ -2,6 +2,11 @@ import os
 from typing import Union
 
 
+# FDComm manages non-blocking descriptor I/O buffers:
+# - Buffer Queueing: Holds read_buffer and write_buffer to aggregate incoming/outgoing command fragments.
+# - Non-blocking Socket Handling: Catches BlockingIOError (EAGAIN/EWOULDBLOCK) to suspend read/write loops
+#   until EPOLLIN/EPOLLOUT signals trigger resumptions.
+# - State Tracking: Checks connection status by detecting empty bytes (EOF) or OS socket errors.
 class FDComm:
     def __init__(self, fd: int):
         self.FD = fd

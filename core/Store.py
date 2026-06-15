@@ -15,6 +15,12 @@ class StoreMeta(type):
         return cls.expires_list[0]
 
 # In-memory storage with eviction and lazy-deletion support, using HashMap on the C heap
+# Store serves as the central in-memory database controller:
+# - C-Heap Storage: Maps string keys to raw RedisObject pointers using the native HashMap.
+# - Memory Limits & Active Eviction: Validates MemTracker allocations against MEMORY_LIMIT,
+#   evicting keys dynamically on writes.
+# - Expiration Tracking: Links object pointers to Unix timestamps in expires_list for O(1) expiry checks.
+# - Lifecycle Ownership: Manages raw struct allocation releases and object reconstruction/deallocation.
 class Store(metaclass=StoreMeta):
     # Core data structures per database using HashMap on the C heap
     stores: List[HashMap] = [HashMap("string", "int64") for _ in range(Config.DB_COUNT)]

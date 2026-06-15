@@ -18,6 +18,11 @@ class RESP_RESPONSES:
     RESP_ZERO: bytes = b":0\r\n"
     RESP_ONE: bytes = b":1\r\n"
 
+# Evaluator acts as the command dispatching and execution engine:
+# - Command Routing: Decodes and routes inbound commands to specific handlers (SET, GET, MULTI, LPUSH, etc.).
+# - Transaction Queueing: Queues commands in connection buffer if a transaction (MULTI) is active.
+# - Pipelined Responses: Aggregates multiple command responses into a single byte buffer for transmission.
+# - Polymorphic Command Logic: Integrates validation assertions for object type/encoding compatibility.
 class Evaluator:
     # Main entry point to evaluate commands and send pipelined responses
     @staticmethod

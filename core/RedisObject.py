@@ -35,6 +35,12 @@ class StructPtr:
     def __init__(self, ptr: int):
         self.ptr = ptr
 
+# RedisObject represents a unified header and value structure mapped on the C-heap:
+# - Type & Encoding bit-packing: Stores object type and encoding in a single c_uint8 field.
+# - LRU Clock (LAT): Tracks last access timestamp (LAT) for eviction strategies (LRU/LFU).
+# - Memory-Efficient Slots: Utilizes __slots__ to eliminate per-instance Python dict overhead.
+# - Polymorphic Value Cleanup: Dynamically cleans up nested structures (QuickLists, Set HashTables)
+#   via weakref finalize callbacks.
 class RedisObject:
     # Using slots to minimize memory overhead per object, supporting weak references for finalizers
     __slots__ = ["_struct_ptr", "_finalizer", "__weakref__"]

@@ -7,6 +7,12 @@ from .EvictPool import EvictPool
 
 logger = logging.getLogger(__name__)
 
+# Eviction implements the cache replacement algorithms for RunDB:
+# - simple-first: Evicts a single random key from the store.
+# - allkeys-random: Evicts a configured percentage (EVICTION_RATIO) of random keys.
+# - allkeys-lru: Approximates Redis's LRU using a persistent eviction pool (EvictPool).
+#   Samples random keys (EVICTION_SAMPLE_SIZE), ranks them by Last Access Time (LAT),
+#   and evicts the least recently accessed keys first.
 class Eviction:
     
     # Triggers the eviction process to free up space in a specific database

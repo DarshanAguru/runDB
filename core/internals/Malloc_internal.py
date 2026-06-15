@@ -55,6 +55,11 @@ class MemTracker:
         }
 
 
+# MallocInternal manages raw memory allocation and tracking on the C-heap:
+# - Custom Prefix Header: Prepends a c_size_t header to allocations to track the buffer's size.
+# - Allocator Isolation: Dynamically loads jemalloc, falling back to standard libc if jemalloc is missing.
+# - MemTracker Integration: Tracks total allocated bytes and blocks in real-time.
+# - Weakref Cleanup: Uses python weakref finalizers to clean up allocated pointers upon object garbage collection.
 class MallocInternal:
 
     __slots__ = ("ptr", "size", "_finalizer",  "__weakref__")

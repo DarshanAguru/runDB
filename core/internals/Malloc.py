@@ -2,6 +2,10 @@ import ctypes
 from .Malloc_internal import MallocInternal, MemTracker
 
 
+# Malloc provides an abstraction layer over raw memory allocations for dynamic data types:
+# - Ctypes Integration: Translates Python objects (ints, floats, strings, lists) to native C equivalents.
+# - Contiguous Memory Layouts: Facilitates allocation of arrays, nested arrays, and structures on the C-heap.
+# - Memory Lifecycles: Integrates with MallocInternal and weakref finalize tracking to prevent memory leaks.
 class DATATYPES:
 
     # Returns the size and ctypes type for the specified integer bit width

@@ -1,3 +1,6 @@
+# RedisAssertions handles type and encoding validations for command processing:
+# - Type Assertion: Verifies that operations are only performed on compatible data structures (e.g. Lists, Sets, Strings).
+# - Encoding Assertion: Validates if the internal layout matches requirements (e.g. INCR expects integer encoding).
 class RedisAssertions:
     # Validates if the object type matches the expected Redis type
     @staticmethod

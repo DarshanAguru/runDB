@@ -10,6 +10,10 @@ class ResponseAccumulator:
         self.buffer.extend(data)
         return len(data)
 
+# Client represents an active connection, tracking state and transactions:
+# - FDComm Integration: Delegates raw read/write socket actions to a FDComm instance.
+# - Transaction Management: Queues command sequences (MULTI/EXEC) and runs them in isolation.
+# - DB Selection: Maintains database context (db index) to support namespace partitioning.
 class Client:
     def __init__(self, comm: FDComm):
         self.cqueue = []

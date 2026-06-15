@@ -2,6 +2,10 @@ from typing import List, Dict
 from config import Config
 
 # Track and manage keyspace and memory statistics across multiple Redis databases
+# Stats collects and aggregates system metrics for INFO commands:
+# - Memory Auditing: Queries MallocInternal tracking to calculate used, max, and available memory.
+# - Keyspace Inspection: Loops over Store instances to count total keys, active expiries, 
+#   and average Time-To-Live (TTL) statistics per database.
 class Stats:    
 
     # Retrieves the memory usage statistics in bytes

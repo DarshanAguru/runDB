@@ -8,6 +8,11 @@ class PoolItem:
         self.key = key
         self.lat = lat
     
+# EvictPool manages the sorted list of potential eviction candidates:
+# - Idle Time Sorting: Candidates are sorted by idle time (calculated using the circular LRU clock).
+# - Bounded Capacity: Maintains a maximum size of EVICTION_POOL_SIZE. When full, newer candidates 
+#   with larger idle times replace the worst candidate (index 0, smallest idle time).
+# - Quick Key Mapping: Utilizes keySet dictionary for O(1) checks and candidate removals.
 class EvictPool:
     # LRU Eviction Pool
     pool: List[PoolItem] = []

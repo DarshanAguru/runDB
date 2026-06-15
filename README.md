@@ -24,6 +24,7 @@ This project was built to gain hands-on experience with:
 - **Background Maintenance**: Learning how to use process forking for non-blocking maintenance tasks like AOF rewriting/dumping.
 - **Data Eviction & Expiration**: Learning how Redis manages memory and cleans up stale keys using active and passive strategies.
 - **Memory Optimization**: Using Python `__slots__` and bit-packing (packing type/encoding into a single byte) to minimize memory overhead per object.
+- **Low-Level C-heap Shifting**: Using system `memmove` to shift contiguous array blocks in-place instead of looping in Python.
 - **Concurrency**: Handling multiple connections in an asynchronous event loop environment.
 
 ## Features
@@ -64,6 +65,7 @@ To minimize the memory footprint of storing millions of keys in-memory, `RunDB` 
   - It binds directly to `libc.malloc()` and `libc.free()`, prepending an 8-byte prefix size header to each allocated block.
   - Real-time allocated memory bytes are tracked in constant time by querying the prefix size header.
   - In Linux environments, native allocations can be powered by `jemalloc` (located in the `./dll/` directory) by starting the server with preloading, ensuring low memory fragmentation just like real Redis.
+- **Optimized Memory Shifts (`memmove`)**: To avoid Python loop overhead when inserting or deleting elements from the contiguous `Intset` array, memory shifts are offloaded directly to the C library's `memmove`. A generic binary search helper with dynamic mid-index retrieval performs optimal `O(log N)` location lookups, while elements are shifted in block steps using `ctypes.memmove` for near-instant native performance.
 
 ### 2. High-Performance Eviction Strategy
 
@@ -144,7 +146,6 @@ The project is structured into modular components:
   - `test_evaluator.py`: Verifies individual commands and MULTI/EXEC transaction isolation.
   - `test_aof.py`: Validates Append-Only File (AOF) state persistence, recovery, and passive/active expiration persistence.
   - `test_quicklist.py`: Validates low-level ZipList entry packing/decoding and QuickList node splitting and deletions.
-  - `test_list_commands.py`: Validates list commands (`LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, `LRANGE`) and memory recycling.
   - `test_set.py`: Validates Set operations (`SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SRANDMEMBER`, `SREM`), Intset-to-HashTable auto-upgrades, and memory recycling.
 - **`testing_utils/`**: Helper utilities for benchmarking and manual storming.
   - `set_storm.py`: Floods the database with fast continuous write requests.

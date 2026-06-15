@@ -5,6 +5,12 @@ from .Malloc import Malloc
 from .Malloc_internal import MallocInternal
 
 
+# ZipList implements a memory-efficient serialization format for lists:
+# - Contiguous Memory Layout: Header stores total size, tail offset, and number of entries.
+# - Dynamic Variable-Length Encoding: Stores each entry's data compressed based on its value/length.
+# - Integer Compression: Encodes integers of various ranges into 4-bit, 8-bit, 16-bit, 24-bit, 32-bit, or 64-bit blocks.
+# - String Length Encoding: Uses prefix bitmasks to store length of strings using 1, 2, or 5 header bytes.
+# - Back-Traversing: Every entry encodes the length of its predecessor, enabling bidirectional traversal.
 class ZipListHelper:
     ZL_SIZE_HEADER_SIZE = 4
     ZL_TAIL_OFFSET_HEADER_SIZE = 4
@@ -292,6 +298,7 @@ class ZipList:
     def _rebuild(self, elements: list[bytes]):
         entry_blocks = []
         prev_len = 0
+        # Iterate and encode each element with its prev_len header and dynamic payload prefix
         for data in elements:
             enc_prev = ZipListHelper.encode_prev_len(prev_len)
             enc_enc, enc_data = ZipListHelper.encode_entry_payload(data)
@@ -302,8 +309,10 @@ class ZipList:
         total_entry_len = sum(len(b) for b in entry_blocks)
         new_size = ZipListHelper.ZL_HEADER_SIZE + total_entry_len + 1
         
+        # Resize raw C memory block to hold new layout size
         self._resize(new_size)
         
+        # Calculate offset of the tail entry to update zltail header
         if len(elements) == 0:
             zltail = ZipListHelper.ZL_HEADER_SIZE
         else:
@@ -311,11 +320,13 @@ class ZipList:
             
         self._write_header(new_size, zltail, len(elements))
         
+        # Copy encoded blocks into contiguous C-heap memory block
         curr_offset = ZipListHelper.ZL_HEADER_SIZE
         for block in entry_blocks:
             ctypes.memmove(self.ptr + curr_offset, block, len(block))
             curr_offset += len(block)
             
+        # Write termination byte (0xFF) at the end of the ZipList
         ctypes.cast(self.ptr + curr_offset, ctypes.POINTER(ctypes.c_uint8))[0] = ZipListHelper.END_MARKER
 
     def insert_at_offset(self, offset: int, data: bytes):
@@ -323,11 +334,13 @@ class ZipList:
             data = data.encode()
             
         zlbytes, _, zllen = self._read_header()
+        # Determine the insertion index based on target offset (head, tail, or middle)
         if offset == ZipListHelper.ZL_HEADER_SIZE:
             idx = 0
         elif offset == zlbytes - 1:
             idx = zllen
         else:
+            # Linear scan to find entry index matching target byte offset
             idx = None
             curr = ZipListHelper.ZL_HEADER_SIZE
             for i in range(zllen):
@@ -338,6 +351,7 @@ class ZipList:
             if idx is None:
                 raise IndexError("Offset not found in ziplist")
                 
+        # Rebuild layout: deserialize elements, insert at index, and serialize back to contiguous C bytes
         elements = list(self)
         elements.insert(idx, data)
         self._rebuild(elements)
@@ -420,6 +434,10 @@ class QuickListStruct(ctypes.Structure):
     ]
 
 
+# QuickList implements a doubly-linked list of ZipLists:
+# - Hybrid Structure: Combines the space efficiency of ZipLists with the O(1) push/pop of doubly-linked lists.
+# - Node Thresholds: Each node (ZipList) is constrained by max_entries and max_bytes thresholds.
+# - Automatic Node Splitting: Splitting logic runs during arbitrary insertions if a node's thresholds are exceeded.
 class QuickList:
     def __init__(self, max_entries: int = 512, max_bytes: int = 8192, ptr=None):
         self.max_entries = max_entries
@@ -683,13 +701,16 @@ class QuickList:
         struct = ctypes.cast(self.struct_addr, ctypes.POINTER(QuickListStruct)).contents
         total = struct.count
         
+        # Adjust negative index
         if idx < 0:
             idx = total + idx
             
+        # Fast path: insert at head if index <= 0
         if idx <= 0:
             self.lpush(data)
             return
             
+        # Fast path: insert at tail if index >= total
         if idx >= total:
             self.rpush(data)
             return
@@ -701,6 +722,7 @@ class QuickList:
             node = ctypes.cast(curr_ptr, ctypes.POINTER(QuickListNodeStruct)).contents
             if rel_idx < node.count:
                 zl = ZipList(ptr=node.zl)
+                # If node can accommodate insert, do it in place
                 if len(zl) < self.max_entries and zl.size + len(data) + 8 <= self.max_bytes:
                     offset = zl.get_offset_at_index(rel_idx)
                     zl.insert_at_offset(offset, data)
@@ -709,7 +731,7 @@ class QuickList:
                     node.count = len(zl)
                     struct.count += 1
                 else:
-                    # Node is full, we must split and insert
+                    # Node is full; split it into two ZipLists and insert the element
                     elements = list(zl)
                     left = elements[:rel_idx]
                     right = elements[rel_idx:]

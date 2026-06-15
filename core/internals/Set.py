@@ -11,6 +11,11 @@ OBJ_ENCODING_HT = 12
 
 SET_MAX_INTSET_ENTRIES = getattr(Config, "SET_MAX_INTSET_ENTRIES", 512)
 
+# Set orchestrates a polymorphic, self-upgrading Set container:
+# - Encoding Promotion: Starts as a space-efficient Intset representation.
+# - Auto-Conversion: Automatically upgrades to a HashTable when member count exceeds 
+#   SET_MAX_INTSET_ENTRIES or a non-integer member is added.
+# - C-Heap Handover: Detaches child finalizers during transition to prevent premature memory release.
 class Set:
     def __init__(self, ptr=None, encoding=None):
         if encoding is None:

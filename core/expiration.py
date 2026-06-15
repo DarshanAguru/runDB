@@ -4,6 +4,11 @@ from .Store import Store
 
 logger = logging.getLogger(__name__)
 
+# Expiration implements the active key expiration daemon loop:
+# - Active Sampling: Periodically samples a random subset (20 keys) to check for expirations.
+# - Probabilistic Threshold: If > 25% of sampled keys are expired, it immediately resamples and 
+#   expires again in a loop, ensuring expired keys do not take up too much memory.
+# - Lazy Expiry fallback: Expired keys are also evicted when accessed in Store.get().
 class Expiration:
     
     # Samples a subset of keys in a database and deletes those that have expired
