@@ -52,6 +52,12 @@ class ZipListHelper:
     # 0xE0 (bin: 11100000) - Prefix for 64-bit signed integer encoding.
     INT64_ENC = 0xE0
 
+    # 0x3F (bin: 00111111) - Mask the last 6 bits to get string length.
+    STRING_LEN_MASK = 0x3F
+
+    # 0x00 (bin: 00000000) - Prefix mask for 6-bit length string encoding.
+    STRING6_ENC = 0x00
+
     # 0x40 (bin: 01000000) - Prefix mask for 14-bit length string encoding.
     STRING14_ENC = 0x40
     
@@ -167,13 +173,13 @@ class ZipListHelper:
                 return str(val).encode(), 9
                 
         # String encoding (first two bits are 00, 01, or 10)
-        if (first_byte & ZipListHelper.MASK_TOP_TWO_BITS) == 0x00:
-            length = first_byte & 0x3F
+        if (first_byte & ZipListHelper.MASK_TOP_TWO_BITS) == ZipListHelper.STRING6_ENC:
+            length = first_byte & ZipListHelper.STRING_LEN_MASK
             data = ctypes.string_at(ptr + offset + 1, length)
             return data, 1 + length
         elif (first_byte & ZipListHelper.MASK_TOP_TWO_BITS) == ZipListHelper.STRING14_ENC:
             second_byte = ctypes.cast(ptr + offset + 1, ctypes.POINTER(ctypes.c_uint8))[0]
-            length = ((first_byte & 0x3F) << 8) | second_byte
+            length = ((first_byte & ZipListHelper.STRING_LEN_MASK) << 8) | second_byte
             data = ctypes.string_at(ptr + offset + 2, length)
             return data, 2 + length
         elif first_byte == ZipListHelper.STRING32_ENC:
