@@ -11,6 +11,7 @@ class REDIS_OBJECT_TYPES:
     TYPE_STRING: int = 0
     TYPE_LIST: int = 1
     TYPE_SET: int = 2
+    TYPE_GEO: int = 3
     
 # Redis object encoding definitions
 class REDIS_OBJECT_ENCODINGS:
@@ -97,6 +98,14 @@ class RedisObject:
                         ht = HashTable("string", ptr=struct.ptr)
                         ht.map.has_ownership = True
                         ht.map.free()
+                elif o_type == REDIS_OBJECT_TYPES.TYPE_GEO:
+                    from .internals.HashMap import HashMap
+                    hm = HashMap("string", "int64", ptr=struct.ptr)
+                    for key, val_ptr in hm.items():
+                        if val_ptr:
+                            MallocInternal.zfree(val_ptr)
+                    hm.has_ownership = True
+                    hm.free()
                 else:
                     MallocInternal.zfree(struct.ptr)
             
@@ -153,12 +162,26 @@ class RedisObject:
                     ht = HashTable("string", ptr=struct.ptr)
                     ht.map.has_ownership = True
                     ht.map.free()
+            elif o_type == REDIS_OBJECT_TYPES.TYPE_GEO:
+                from .internals.HashMap import HashMap
+                hm = HashMap("string", "int64", ptr=struct.ptr)
+                for key, val_ptr in hm.items():
+                    if val_ptr:
+                        MallocInternal.zfree(val_ptr)
+                hm.has_ownership = True
+                hm.free()
             else:
                 MallocInternal.zfree(struct.ptr)
             struct.ptr = None
             struct.size = 0
 
         if new_val is None:
+            return
+
+        o_type = (struct.typeEncoding >> 4) & 0x0F
+        if o_type == REDIS_OBJECT_TYPES.TYPE_GEO:
+            struct.ptr = new_val.release()
+            struct.size = new_val.size
             return
 
         encoding = self.getEncoding()
@@ -206,6 +229,11 @@ class RedisObject:
         struct = ctypes.cast(self._struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
         if not struct.ptr:
             return None
+        
+        o_type = self.getType()
+        if o_type == REDIS_OBJECT_TYPES.TYPE_GEO:
+            from .internals.HashMap import HashMap
+            return HashMap("string", "int64", ptr=struct.ptr)
         
         encoding = self.getEncoding()
         if encoding == REDIS_OBJECT_ENCODINGS.INT:

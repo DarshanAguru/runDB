@@ -9,6 +9,9 @@ class Encoder:
     # Encodes data into RESP format based on type and flags
     @staticmethod
     def encode(val: Any, bulk: bool = False) -> bytes:
+        if val is None:
+            return b"$-1\r\n"
+            
         if isinstance(val, int):
             return f":{val}\r\n".encode("utf-8")
         

@@ -93,6 +93,16 @@ class Evaluator:
                     res = Evaluator.__evalSRANDMEMBER(db, cmd.args)
                 elif cmd.cmd == "DEBUG":
                     res = Evaluator.__evalDEBUG(db, cmd.args)
+                elif cmd.cmd == "GEOADD":
+                    res = Evaluator.__evalGEOADD(db, cmd.args)
+                elif cmd.cmd == "GEOPOS":
+                    res = Evaluator.__evalGEOPOS(db, cmd.args)
+                elif cmd.cmd == "GEODIST":
+                    res = Evaluator.__evalGEODIST(db, cmd.args)
+                elif cmd.cmd == "GEOSEARCH":
+                    res = Evaluator.__evalGEOSEARCH(db, cmd.args)
+                elif cmd.cmd == "GEOHASH":
+                    res = Evaluator.__evalGEOHASH(db, cmd.args)
                 else:
                     res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
             
@@ -729,6 +739,386 @@ class Evaluator:
                 for _ in range(count):
                     res.append(str(random.choice(members)))
             return Encoder.encode(res)
+
+    @staticmethod
+    def __toBase32Geohash(lon: float, lat: float) -> str:
+        from .internals.Geohash import GeoHashHelper
+        return GeoHashHelper.toBase32Geohash(lon, lat)
+
+    @staticmethod
+    def __evalGEOADD(db: int, args: List[str]) -> bytes:
+        from .internals.Geohash import GeoHashHelper
+        if len(args) < 4 or (len(args) - 1) % 3 != 0:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'geoadd' command")
+        
+        key = args[0]
+        # Validate coordinates first
+        triples = []
+        for i in range(1, len(args), 3):
+            try:
+                lon = float(args[i])
+                lat = float(args[i+1])
+            except ValueError:
+                return Evaluator.__getErrorResponse("ERR value is not a valid float")
+            
+            # Check range
+            if lon < GeoHashHelper.LON_MIN or lon > GeoHashHelper.LON_MAX or lat < GeoHashHelper.LAT_MIN or lat > GeoHashHelper.LAT_MAX:
+                return Evaluator.__getErrorResponse(f"ERR invalid longitude,latitude pair {lon:.6f},{lat:.6f}")
+            
+            member = args[i+2]
+            triples.append((lon, lat, member))
+            
+        val = Store.get(key, db)
+        if val is not None:
+            if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_GEO):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            hm = val.getValue()
+        else:
+            from .internals.HashMap import HashMap
+            hm = HashMap("string", "int64")
+            
+        from .internals.Geohash import GeoHashStruct
+        from .internals.Malloc_internal import MallocInternal
+        import ctypes
+        
+        added_count = 0
+        for lon, lat, member in triples:
+            old_ptr = hm.get(member)
+            is_new = old_ptr is None
+            if not is_new:
+                # Reuse/Overwrite: free the old pointer first
+                MallocInternal.zfree(old_ptr)
+            else:
+                added_count += 1
+                
+            new_ptr = MallocInternal.zcalloc(ctypes.sizeof(GeoHashStruct))
+            struct_obj = ctypes.cast(new_ptr, ctypes.POINTER(GeoHashStruct)).contents
+            struct_obj.lat = lat
+            struct_obj.lon = lon
+            
+            hm.set(member, new_ptr)
+            
+        if val is None:
+            Store.put(key, RedisObject(hm, REDIS_OBJECT_TYPES.TYPE_GEO, REDIS_OBJECT_ENCODINGS.HT), -1, db)
+        else:
+            struct = val.val
+            struct.ptr = hm.release()
+            struct.size = hm.size
+            Store.put(key, val, Store.getExpiry(val, db), db)
+            
+        return Encoder.encode(added_count)
+
+    @staticmethod
+    def __evalGEOPOS(db: int, args: List[str]) -> bytes:
+        if len(args) < 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'geopos' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        if val is None:
+            res = [None] * (len(args) - 1)
+            return Encoder.encode(res)
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_GEO):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        hm = val.getValue()
+        from .internals.Geohash import GeoHashStruct
+        import ctypes
+        
+        res = []
+        for member in args[1:]:
+            ptr = hm.get(member)
+            if ptr is None:
+                res.append(None)
+            else:
+                struct_obj = ctypes.cast(ptr, ctypes.POINTER(GeoHashStruct)).contents
+                res.append([f"{struct_obj.lon:.6f}", f"{struct_obj.lat:.6f}"])
+                
+        return Encoder.encode(res)
+
+    @staticmethod
+    def __evalGEODIST(db: int, args: List[str]) -> bytes:
+        if len(args) < 3 or len(args) > 4:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'geodist' command")
+            
+        key = args[0]
+        member1 = args[1]
+        member2 = args[2]
+        
+        unit = "m"
+        if len(args) == 4:
+            unit = args[3].lower()
+            
+        units = {
+            "m": 1.0,
+            "km": 1000.0,
+            "ft": 0.3048,
+            "mi": 1609.34
+        }
+        if unit not in units:
+            return Evaluator.__getErrorResponse("ERR unsupported unit provided. please use M, KM, FT, MI")
+            
+        val = Store.get(key, db)
+        if val is None:
+            return RESP_RESPONSES.RESP_NIL
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_GEO):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        hm = val.getValue()
+        ptr1 = hm.get(member1)
+        ptr2 = hm.get(member2)
+        if ptr1 is None or ptr2 is None:
+            return RESP_RESPONSES.RESP_NIL
+            
+        from .internals.Geohash import GeoHashStruct, GeoHashHelper
+        import ctypes
+        
+        struct1 = ctypes.cast(ptr1, ctypes.POINTER(GeoHashStruct)).contents
+        struct2 = ctypes.cast(ptr2, ctypes.POINTER(GeoHashStruct)).contents
+        
+        dist = GeoHashHelper.geohashGetDistance(struct1.lon, struct1.lat, struct2.lon, struct2.lat)
+        converted = dist / units[unit]
+        
+        return Encoder.encode(f"{converted:.4f}", bulk=True)
+
+    @staticmethod
+    def __evalGEOHASH(db: int, args: List[str]) -> bytes:
+        if len(args) < 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'geohash' command")
+            
+        key = args[0]
+        val = Store.get(key, db)
+        if val is None:
+            return Encoder.encode([None] * (len(args) - 1))
+            
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_GEO):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        hm = val.getValue()
+        from .internals.Geohash import GeoHashStruct
+        import ctypes
+        
+        res = []
+        for member in args[1:]:
+            ptr = hm.get(member)
+            if ptr is None:
+                res.append(None)
+            else:
+                struct_obj = ctypes.cast(ptr, ctypes.POINTER(GeoHashStruct)).contents
+                hash_str = Evaluator.__toBase32Geohash(struct_obj.lon, struct_obj.lat)
+                res.append(hash_str)
+                
+        return Encoder.encode(res)
+
+    @staticmethod
+    def __evalGEOSEARCH(db: int, args: List[str]) -> bytes:
+        from .internals.Geohash import GeoHashStruct, GeoHashHelper, GeoHashRange, GeoHashBits
+        import ctypes
+        import math
+
+        # Validate arguments length
+        if len(args) < 5:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'geosearch' command")
+
+        key = args[0]
+        val = Store.get(key, db)
+        if val is None:
+            return Encoder.encode([]) # Key doesn't exist, return empty list
+
+        # Ensure object type is TYPE_GEO
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_GEO):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+
+        hm = val.getValue()
+
+        # 1. Parse center point option: FROMMEMBER or FROMLONLAT
+        args_lower = [a.lower() for a in args]
+        
+        center_lon = None
+        center_lat = None
+        
+        if "frommember" in args_lower:
+            m_idx = args_lower.index("frommember")
+            if m_idx + 1 >= len(args):
+                return Evaluator.__getErrorResponse("ERR syntax error")
+            member_name = args[m_idx + 1]
+            member_ptr = hm.get(member_name)
+            if member_ptr is None:
+                return Evaluator.__getErrorResponse("ERR could not decode requested zset member")
+            struct_obj = ctypes.cast(member_ptr, ctypes.POINTER(GeoHashStruct)).contents
+            center_lon = struct_obj.lon
+            center_lat = struct_obj.lat
+        elif "fromlonlat" in args_lower:
+            l_idx = args_lower.index("fromlonlat")
+            if l_idx + 2 >= len(args):
+                return Evaluator.__getErrorResponse("ERR syntax error")
+            try:
+                center_lon = float(args[l_idx + 1])
+                center_lat = float(args[l_idx + 2])
+            except ValueError:
+                return Evaluator.__getErrorResponse("ERR value is not a valid float")
+            
+            # Validate coordinates range
+            if center_lon < -180.0 or center_lon > 180.0 or \
+               center_lat < GeoHashHelper.LAT_MIN or center_lat > GeoHashHelper.LAT_MAX:
+                return Evaluator.__getErrorResponse("ERR invalid longitude,latitude pair")
+        else:
+            return Evaluator.__getErrorResponse("ERR syntax error")
+
+        # 2. Parse search shape: BYRADIUS or BYBOX
+        is_radius = False
+        is_box = False
+        radius = 0.0
+        width = 0.0
+        height = 0.0
+        unit = None
+        
+        units = {"m": 1.0, "km": 1000.0, "ft": 0.3048, "mi": 1609.34}
+        
+        if "byradius" in args_lower:
+            is_radius = True
+            r_idx = args_lower.index("byradius")
+            if r_idx + 2 >= len(args):
+                return Evaluator.__getErrorResponse("ERR syntax error")
+            try:
+                radius = float(args[r_idx + 1])
+            except ValueError:
+                return Evaluator.__getErrorResponse("ERR value is not a valid float")
+            unit = args_lower[r_idx + 2]
+            if unit not in units:
+                return Evaluator.__getErrorResponse("ERR unsupported unit")
+        elif "bybox" in args_lower:
+            is_box = True
+            b_idx = args_lower.index("bybox")
+            if b_idx + 3 >= len(args):
+                return Evaluator.__getErrorResponse("ERR syntax error")
+            try:
+                width = float(args[b_idx + 1])
+                height = float(args[b_idx + 2])
+            except ValueError:
+                return Evaluator.__getErrorResponse("ERR value is not a valid float")
+            unit = args_lower[b_idx + 3]
+            if unit not in units:
+                return Evaluator.__getErrorResponse("ERR unsupported unit")
+        else:
+            return Evaluator.__getErrorResponse("ERR syntax error")
+
+        # 3. Parse options: ASC/DESC, COUNT count [ANY], WITHCOORD, WITHDIST, WITHHASH
+        withdist = False
+        withhash = False
+        withcoord = False
+        sort_order = None
+        count_limit = None
+        
+        i = 1
+        while i < len(args):
+            arg_lower = args_lower[i]
+            if arg_lower == "frommember":
+                i += 2
+            elif arg_lower == "fromlonlat":
+                i += 3
+            elif arg_lower == "byradius":
+                i += 3
+            elif arg_lower == "bybox":
+                i += 4
+            elif arg_lower == "withdist":
+                withdist = True
+                i += 1
+            elif arg_lower == "withhash":
+                withhash = True
+                i += 1
+            elif arg_lower == "withcoord":
+                withcoord = True
+                i += 1
+            elif arg_lower == "asc":
+                sort_order = "ASC"
+                i += 1
+            elif arg_lower == "desc":
+                sort_order = "DESC"
+                i += 1
+            elif arg_lower == "count":
+                if i + 1 >= len(args):
+                    return Evaluator.__getErrorResponse("ERR syntax error")
+                try:
+                    count_limit = int(args[i + 1])
+                except ValueError:
+                    return Evaluator.__getErrorResponse("ERR value is not an integer or out of range")
+                if count_limit <= 0:
+                    return Evaluator.__getErrorResponse("ERR COUNT must be greater than 0")
+                i += 2
+                if i < len(args) and args_lower[i] == "any":
+                    i += 1
+            else:
+                i += 1
+
+        matches = []
+        R = 6372797.560856
+        
+        for member, ptr in hm.items():
+            struct_obj = ctypes.cast(ptr, ctypes.POINTER(GeoHashStruct)).contents
+            
+            # Calculate distance between center and member
+            dist = GeoHashHelper.geohashGetDistance(center_lon, center_lat, struct_obj.lon, struct_obj.lat)
+            
+            inside = False
+            if is_radius:
+                inside = (dist <= radius * units[unit])
+            elif is_box:
+                # Bounding box filter:
+                # 1. Latitude check
+                lat_dist = abs(struct_obj.lat - center_lat) * (math.pi / 180.0) * R
+                # 2. Longitude check with wrap-around
+                diff_lon = abs(struct_obj.lon - center_lon)
+                if diff_lon > 180.0:
+                    diff_lon = 360.0 - diff_lon
+                lon_dist = diff_lon * (math.pi / 180.0) * R * math.cos(math.radians(center_lat))
+                
+                inside = (lat_dist <= (height * units[unit]) / 2.0) and (lon_dist <= (width * units[unit]) / 2.0)
+                
+            if inside:
+                score = 0
+                if withhash:
+                    r_long = GeoHashRange(min=GeoHashHelper.LON_MIN, max=GeoHashHelper.LON_MAX)
+                    r_lat = GeoHashRange(min=GeoHashHelper.LAT_MIN, max=GeoHashHelper.LAT_MAX)
+                    bits = GeoHashBits()
+                    GeoHashHelper.geohashEncode(ctypes.byref(r_long), ctypes.byref(r_lat), struct_obj.lon, struct_obj.lat, 26, ctypes.byref(bits))
+                    score = bits.bits
+                matches.append({
+                    "member": member,
+                    "dist": dist / units[unit],
+                    "score": score,
+                    "lon": struct_obj.lon,
+                    "lat": struct_obj.lat
+                })
+
+        # Apply sorting
+        if sort_order == "ASC":
+            matches.sort(key=lambda x: x["dist"])
+        elif sort_order == "DESC":
+            matches.sort(key=lambda x: x["dist"], reverse=True)
+            
+        # Apply count limit
+        if count_limit is not None:
+            matches = matches[:count_limit]
+
+        # Format results
+        res = []
+        for m in matches:
+            if not (withdist or withhash or withcoord):
+                res.append(m["member"])
+            else:
+                item = [m["member"]]
+                if withdist:
+                    item.append(f"{m['dist']:.4f}")
+                if withhash:
+                    item.append(m["score"])
+                if withcoord:
+                    item.append([f"{m['lon']:.6f}", f"{m['lat']:.6f}"])
+                res.append(item)
+                
+        return Encoder.encode(res)
 
 
     

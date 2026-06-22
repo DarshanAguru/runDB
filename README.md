@@ -35,7 +35,7 @@ This project was built to gain hands-on experience with:
 - **AOF Snapshotting**: Manually triggerable point-in-time state dumps to an AOF file, fully restoring the states across all active databases.
 - **Background Forking**: Non-blocking AOF dumping using `multiprocessing` forking.
 - **Pipelining**: Support for batching multiple commands in a single network request.
-- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, `SELECT`, `BGREWRITEAOF`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, `LRANGE`, `SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SRANDMEMBER`, `SREM`, and `DEBUG OBJECT`.
+- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, `SELECT`, `BGREWRITEAOF`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, `LRANGE`, `SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SRANDMEMBER`, `SREM`, `DEBUG OBJECT`, `GEOADD`, `GEOPOS`, `GEODIST`, `GEOSEARCH`, and `GEOHASH`.
 - **Memory Optimized**: Uses a custom open-addressing C-heap `HashMap` for database key-value storage and active key expirations. Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently. Includes support for memory-efficient Redis-style list structures via `QuickList`/`ZipList` and set structures via `Intset`/`HashTable`.
 - **Type Awareness**: Automatically deduces and stores object types (`STRING`) and encodings (`INT`, `EMBSTR`, `RAW`).
 - **Key Expiration**: Passive (lazy) deletion on access and active expiration strategies (random sampling) to clean up stale data across all stores.
@@ -269,6 +269,11 @@ Modify `config.py` to adjust system limits:
 | `SRANDMEMBER key [count]`      | Returns one or multiple random members from a set.                       |
 | `SREM key member [member ...]` | Removes one or more members from a set.                                  |
 | `DEBUG OBJECT key`            | Debug command displaying object memory, encoding, and access metrics.      |
+| `GEOADD key longitude latitude member [lon lat member ...]` | Adds one or more geospatial items (longitude, latitude, member) to the specified key. |
+| `GEOPOS key member [member ...]` | Returns the longitude and latitude of members. |
+| `GEODIST key member1 member2 [unit]` | Returns the distance between two members in the specified unit (M, KM, FT, MI). |
+| `GEOSEARCH key <FROMMEMBER member | FROMLONLAT lon lat> <BYRADIUS radius unit | BYBOX width height unit> [ASC|DESC] [COUNT count [ANY]] [WITHCOORD] [WITHDIST] [WITHHASH]` | Queries a geospatial index for members located within a specific circular radius or rectangular bounding box. |
+| `GEOHASH key member [member ...]` | Returns standard base32 geohash strings for the specified members. |
 
 ## Changelog
 
