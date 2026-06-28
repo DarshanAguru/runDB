@@ -77,6 +77,7 @@ class HashMap:
         
         # Free allocated string keys/values
         if free_keys or free_vals:
+            from .sds import SDS
             header_size = ctypes.sizeof(HashMapStruct)
             bucket_size = ctypes.sizeof(bucket_class)
             for i in range(capacity):
@@ -84,9 +85,9 @@ class HashMap:
                 bucket = ctypes.cast(b_ptr, ctypes.POINTER(bucket_class)).contents
                 if bucket.state == HashMapHelper.OCCUPIED_STATE:  # Occupied
                     if free_keys and bucket.key:
-                        MallocInternal.zfree(bucket.key)
+                        SDS(ptr=bucket.key).free()
                     if free_vals and bucket.val:
-                        MallocInternal.zfree(bucket.val)
+                        SDS(ptr=bucket.val).free()
                         
         MallocInternal.zfree(ptr)
 
@@ -163,7 +164,8 @@ class HashMap:
         if self.keyType == ctypes.c_void_p:
             if not key_field:
                 return None
-            b = ctypes.string_at(key_field)
+            from .sds import SDS
+            b = bytes(SDS(ptr=key_field))
             try:
                 return b.decode()
             except UnicodeDecodeError:
@@ -175,7 +177,8 @@ class HashMap:
         if self.valType == ctypes.c_void_p:
             if not val_field:
                 return None
-            b = ctypes.string_at(val_field)
+            from .sds import SDS
+            b = bytes(SDS(ptr=val_field))
             try:
                 return b.decode()
             except UnicodeDecodeError:
@@ -187,20 +190,18 @@ class HashMap:
         # For string types, copies Python string bytes into native C-heap memory block (+1 for null-terminator)
         if self.keyType == ctypes.c_void_p:
             b = key.encode() if isinstance(key, str) else key
-            size = len(b) + 1
-            ptr = MallocInternal.zmalloc(size)
-            ctypes.memmove(ptr, b + b"\0", size)
-            return ptr, size
+            from .sds import SDS
+            sds_obj = SDS(b)
+            return sds_obj.release(), len(b)
         else:
             return key, 0
 
     def _encode_val(self, val) -> tuple[Any, int]:
         if self.valType == ctypes.c_void_p:
             b = val.encode() if isinstance(val, str) else val
-            size = len(b) + 1
-            ptr = MallocInternal.zmalloc(size)
-            ctypes.memmove(ptr, b + b"\0", size)
-            return ptr, size
+            from .sds import SDS
+            sds_obj = SDS(b)
+            return sds_obj.release(), len(b)
         else:
             return val, 0
 
@@ -244,7 +245,8 @@ class HashMap:
                 b_key = self._decode_key(bucket.key)
                 if b_key == key:
                     if self.valType == ctypes.c_void_p and bucket.val:
-                        MallocInternal.zfree(bucket.val)
+                        from .sds import SDS
+                        SDS(ptr=bucket.val).free()
                     enc_val, _ = self._encode_val(val)
                     bucket.val = enc_val
                     return
@@ -298,14 +300,15 @@ class HashMap:
             elif bucket.state == HashMapHelper.OCCUPIED_STATE:
                 b_key = self._decode_key(bucket.key)
                 if b_key == key:
+                    from .sds import SDS
                     if self.keyType == ctypes.c_void_p and bucket.key:
-                        MallocInternal.zfree(bucket.key)
+                        SDS(ptr=bucket.key).free()
                         bucket.key = None
                     else:
                         bucket.key = 0
                         
                     if self.valType == ctypes.c_void_p and bucket.val:
-                        MallocInternal.zfree(bucket.val)
+                        SDS(ptr=bucket.val).free()
                         bucket.val = None
                     else:
                         bucket.val = 0
@@ -322,13 +325,14 @@ class HashMap:
     def clear(self):
         struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(HashMapStruct)).contents
         capacity = struct_obj.capacity
+        from .sds import SDS
         for i in range(capacity):
             bucket = self._get_bucket(i)
             if bucket.state == HashMapHelper.OCCUPIED_STATE:
                 if self.keyType == ctypes.c_void_p and bucket.key:
-                    MallocInternal.zfree(bucket.key)
+                    SDS(ptr=bucket.key).free()
                 if self.valType == ctypes.c_void_p and bucket.val:
-                    MallocInternal.zfree(bucket.val)
+                    SDS(ptr=bucket.val).free()
             bucket.state = HashMapHelper.EMPTY_STATE
             if self.keyType == ctypes.c_void_p:
                 bucket.key = None

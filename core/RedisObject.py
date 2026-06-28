@@ -107,7 +107,12 @@ class RedisObject:
                     hm.has_ownership = True
                     hm.free()
                 else:
-                    MallocInternal.zfree(struct.ptr)
+                    o_enc = struct.typeEncoding & 0x0F
+                    if o_enc in (REDIS_OBJECT_ENCODINGS.RAW, REDIS_OBJECT_ENCODINGS.EMBSTR):
+                        from .internals.sds import SDS
+                        SDS(ptr=struct.ptr).free()
+                    else:
+                        MallocInternal.zfree(struct.ptr)
             
             # Detach finalizer if it exists (i.e. is MallocInternal)
             if hasattr(struct_ptr, "_finalizer") and struct_ptr._finalizer:
@@ -171,7 +176,12 @@ class RedisObject:
                 hm.has_ownership = True
                 hm.free()
             else:
-                MallocInternal.zfree(struct.ptr)
+                o_enc = struct.typeEncoding & 0x0F
+                if o_enc in (REDIS_OBJECT_ENCODINGS.RAW, REDIS_OBJECT_ENCODINGS.EMBSTR):
+                    from .internals.sds import SDS
+                    SDS(ptr=struct.ptr).free()
+                else:
+                    MallocInternal.zfree(struct.ptr)
             struct.ptr = None
             struct.size = 0
 
@@ -199,15 +209,13 @@ class RedisObject:
             struct.ptr = new_val.release()
             struct.size = new_val.underlying.size if encoding == REDIS_OBJECT_ENCODINGS.INTSET else new_val.underlying.map.size
         else:
-            if isinstance(new_val, str):
-                data = new_val.encode()
+            from .internals.sds import SDS
+            if isinstance(new_val, SDS):
+                sds_obj = new_val
             else:
-                data = bytes(new_val)
-            size = len(data) + 1
-            ptr = MallocInternal.zmalloc(size)
-            ctypes.memmove(ptr, data + b"\0", size)
-            struct.ptr = ptr
-            struct.size = size
+                sds_obj = SDS(new_val)
+            struct.ptr = sds_obj.release()
+            struct.size = len(sds_obj) + 1
     
     def updateLAT(self) -> None:
         struct = ctypes.cast(self._struct_ptr.ptr, ctypes.POINTER(RedisObjectStruct)).contents
@@ -245,7 +253,8 @@ class RedisObject:
             from .internals.Set import Set
             return Set(ptr=struct.ptr, encoding=encoding)
         else:
-            return ctypes.string_at(struct.ptr, struct.size - 1).decode()
+            from .internals.sds import SDS
+            return str(SDS(ptr=struct.ptr))
     
     def getLRUClock(self) -> int:
         return int(time.time()) & Config.LRU_BITS_MASK

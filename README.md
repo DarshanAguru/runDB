@@ -35,8 +35,8 @@ This project was built to gain hands-on experience with:
 - **AOF Snapshotting**: Manually triggerable point-in-time state dumps to an AOF file, fully restoring the states across all active databases.
 - **Background Forking**: Non-blocking AOF dumping using `multiprocessing` forking.
 - **Pipelining**: Support for batching multiple commands in a single network request.
-- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, `SELECT`, `BGREWRITEAOF`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, `LRANGE`, `SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SRANDMEMBER`, `SREM`, `DEBUG OBJECT`, `GEOADD`, `GEOPOS`, `GEODIST`, `GEOSEARCH`, and `GEOHASH`.
-- **Memory Optimized**: Uses a custom open-addressing C-heap `HashMap` for database key-value storage and active key expirations. Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently. Includes support for memory-efficient Redis-style list structures via `QuickList`/`ZipList` and set structures via `Intset`/`HashTable`.
+- **Command Set**: Supports core Redis commands like `PING`, `SET`, `GET`, `DEL`, `EXPIRE`, `TTL`, `INCR`, `INFO`, `CLIENT`, `LATENCY`, `SELECT`, `BGREWRITEAOF`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LINDEX`, `LRANGE`, `SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SRANDMEMBER`, `SREM`, `DEBUG OBJECT`, `GEOADD`, `GEOPOS`, `GEODIST`, `GEOSEARCH`, `GEOHASH`, `PFADD`, `PFCOUNT`, `PFMERGE`, `BFADD`, and `BFEXISTS`.
+- **Memory Optimized**: Uses a custom open-addressing C-heap `HashMap` for database key-value storage and active key expirations. Uses `__slots__` and bit-packed metadata (4-bit type, 4-bit encoding) to store data efficiently. Includes support for memory-efficient Redis-style list structures via `QuickList`/`ZipList`, set structures via `Intset`/`HashTable`, HyperLogLog via raw SDS registers, and Bloom Filters via bitwise C-heap fields.
 - **Type Awareness**: Automatically deduces and stores object types (`STRING`) and encodings (`INT`, `EMBSTR`, `RAW`).
 - **Key Expiration**: Passive (lazy) deletion on access and active expiration strategies (random sampling) to clean up stale data across all stores.
 - **Graceful Shutdown**: Traps OS termination signals, coordinates with active request executors atomically, and triggers a final AOF persistence dump before exiting cleanly.
@@ -103,6 +103,15 @@ To prevent data loss and ensure system stability upon termination:
 - **Encapsulated Client State**: Active connections are tracked cleanly in `Server.con_clients` via modern `Client` objects, removing manual connection/socket mappings.
 - **Isolated Transaction States**: Transaction queues (`cqueue`) and states (`isTrans`) are bound directly to their corresponding `Client` instance, ensuring concurrent client transactions are fully isolated and executed in RESP array batch format.
 
+### 7. Probabilistic Data Structures (HyperLogLog & Bloom Filter)
+
+To support memory-efficient cardinality estimation and membership queries on large datasets, `RunDB` includes high-performance probabilistic structures:
+- **HyperLogLog (HLL)**: Implements a memory-efficient cardinality estimator using a 16,384 register array packed onto the native C heap via a raw SDS buffer. Includes a 4-byte `"HYLL"` magic signature for type-safe persistence validation.
+- **Bloom Filter**: A binary-safe Bloom Filter implemented directly on the C heap using a 64-bit bit field.
+  - **Double Hashing**: Uses an optimized 64-bit FNV-1a hash split into two 32-bit halves to compute $K=4$ unique bit positions in a single pass without redundant hashing.
+  - **Magic Byte Signature**: Prepends a 4-byte `"BLMF"` signature to the binary layout for type-safe validation during database loads and AOF restores.
+  - **Redis-Compatible Commands**: Implements `BFADD` (returns 1 if a new bit was set, 0 otherwise) and `BFEXISTS`.
+
 ---
 
 ## Architecture
@@ -132,6 +141,8 @@ The project is structured into modular components:
     - `Intset.py`: Memory-efficient contiguous integer-sorted array.
     - `HashTable.py`: C-heap Hash Table wrapper around HashMap.
     - `Set.py`: Set implementation managing transparent Intset to HashTable upgrades.
+    - `HyperLogLog.py`: Memory-efficient cardinality estimator utilizing raw SDS registers.
+    - `BloomFilter.py`: High-performance, binary-safe Bloom Filter on the C heap using FNV-1a double-hashing and magic-byte type checking.
 - **`server/`**: Handles OS-level connections, logs, and process states.
   - `Server.py`: Single-threaded event-loop server powered by Linux-specific `select.epoll` async sockets.
   - `util/`: Helper utilities for server printing and signal coordination:
@@ -147,6 +158,8 @@ The project is structured into modular components:
   - `test_aof.py`: Validates Append-Only File (AOF) state persistence, recovery, and passive/active expiration persistence.
   - `test_quicklist.py`: Validates low-level ZipList entry packing/decoding and QuickList node splitting and deletions.
   - `test_set.py`: Validates Set operations (`SADD`, `SISMEMBER`, `SCARD`, `SMEMBERS`, `SRANDMEMBER`, `SREM`), Intset-to-HashTable auto-upgrades, and memory recycling.
+  - `test_hll.py`: Validates HyperLogLog register accuracy, card calculations, and `PFMERGE`.
+  - `test_bloom_filter.py`: Validates Bloom Filter membership checking, FNV-1a double-hashing, and `BFADD`/`BFEXISTS` evaluator commands.
 - **`testing_utils/`**: Helper utilities for benchmarking and manual storming.
   - `set_storm.py`: Floods the database with fast continuous write requests.
   - `set_storm_with_expiration.py`: Benchmarks lazy and active key expiration cleanup loops under load.
@@ -274,6 +287,11 @@ Modify `config.py` to adjust system limits:
 | `GEODIST key member1 member2 [unit]` | Returns the distance between two members in the specified unit (M, KM, FT, MI). |
 | `GEOSEARCH key <FROMMEMBER member | FROMLONLAT lon lat> <BYRADIUS radius unit | BYBOX width height unit> [ASC|DESC] [COUNT count [ANY]] [WITHCOORD] [WITHDIST] [WITHHASH]` | Queries a geospatial index for members located within a specific circular radius or rectangular bounding box. |
 | `GEOHASH key member [member ...]` | Returns standard base32 geohash strings for the specified members. |
+| `PFADD key element [element ...]` | Adds the specified elements to the HyperLogLog. |
+| `PFCOUNT key [key ...]` | Returns the approximated cardinality of the set(s) observed by the HyperLogLog(s). |
+| `PFMERGE destkey sourcekey [sourcekey ...]` | Merges multiple HyperLogLog values into a single unique value. |
+| `BFADD key item` | Adds an item to the Bloom Filter. Returns 1 if the item was newly added, 0 if it was already present. |
+| `BFEXISTS key item` | Checks if an item is probably in the Bloom Filter (returns 1) or definitely not (returns 0). |
 
 ## Changelog
 

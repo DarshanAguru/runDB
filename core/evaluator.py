@@ -103,6 +103,16 @@ class Evaluator:
                     res = Evaluator.__evalGEOSEARCH(db, cmd.args)
                 elif cmd.cmd == "GEOHASH":
                     res = Evaluator.__evalGEOHASH(db, cmd.args)
+                elif cmd.cmd == "PFADD":
+                    res = Evaluator.__evalPFADD(db, cmd.args)
+                elif cmd.cmd == "PFCOUNT":
+                    res = Evaluator.__evalPFCOUNT(db, cmd.args)
+                elif cmd.cmd == "PFMERGE":
+                    res = Evaluator.__evalPFMERGE(db, cmd.args)
+                elif cmd.cmd == "BFADD":
+                    res = Evaluator.__evalBFADD(db, cmd.args)
+                elif cmd.cmd == "BFEXISTS":
+                    res = Evaluator.__evalBFEXISTS(db, cmd.args)
                 else:
                     res = Evaluator.__getErrorResponse("ERR unknown command '" + cmd.cmd + "'")
             
@@ -1119,6 +1129,231 @@ class Evaluator:
                 res.append(item)
                 
         return Encoder.encode(res)
+
+    @staticmethod
+    def __evalPFADD(db: int, args: List[str]) -> bytes:
+        if len(args) < 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'pfadd' command")
+        
+        key = args[0]
+        val = Store.get(key, db)
+        
+        from .internals.HyperLogLog import HyperLogLog, HLL_SIZE
+        from .RedisObject import RedisObject, REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
+        import ctypes
+        
+        if val is None:
+            hll = HyperLogLog()
+        else:
+            if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+            struct = val.val
+            if struct.size != HLL_SIZE + 1:
+                return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid HyperLogLog string value")
+            
+            magic = ctypes.string_at(struct.ptr, 4)
+            if magic != b"HYLL":
+                return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid HyperLogLog string value")
+                
+            hll = HyperLogLog(ptr=struct.ptr)
+            
+        modified = False
+        if len(args) > 1:
+            for element in args[1:]:
+                if hll.add(element.encode('utf-8')):
+                    modified = True
+        else:
+            if val is None:
+                modified = True
+                
+        if val is None:
+            hll_ptr = hll.release()
+            obj = RedisObject(o_type=REDIS_OBJECT_TYPES.TYPE_STRING, o_encoding=REDIS_OBJECT_ENCODINGS.RAW)
+            obj.val.ptr = hll_ptr
+            obj.val.size = HLL_SIZE + 1
+            Store.put(key, obj, -1, db)
+        else:
+            if modified:
+                Store.put(key, val, Store.getExpiry(val, db), db)
+                
+        return RESP_RESPONSES.RESP_ONE if modified else RESP_RESPONSES.RESP_ZERO
+
+    @staticmethod
+    def __evalPFCOUNT(db: int, args: List[str]) -> bytes:
+        if len(args) < 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'pfcount' command")
+        
+        from .internals.HyperLogLog import HyperLogLog, HLL_SIZE
+        from .RedisObject import REDIS_OBJECT_TYPES
+        import ctypes
+        
+        if len(args) == 1:
+            key = args[0]
+            val = Store.get(key, db)
+            if val is None:
+                return RESP_RESPONSES.RESP_ZERO
+                
+            if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+                
+            struct_obj = val.val
+            if struct_obj.size != HLL_SIZE + 1 or ctypes.string_at(struct_obj.ptr, 4) != b"HYLL":
+                return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid HyperLogLog string value")
+                
+            hll = HyperLogLog(ptr=struct_obj.ptr)
+            card = hll.count()
+            return Encoder.encode(card)
+            
+        else:
+            temp_hll = HyperLogLog()
+            src_hlls = []
+            try:
+                for key in args:
+                    val = Store.get(key, db)
+                    if val is None:
+                        continue
+                        
+                    if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+                        return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+                        
+                    struct_obj = val.val
+                    if struct_obj.size != HLL_SIZE + 1 or ctypes.string_at(struct_obj.ptr, 4) != b"HYLL":
+                        return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid HyperLogLog string value")
+                        
+                    src_hlls.append(HyperLogLog(ptr=struct_obj.ptr))
+                    
+                if src_hlls:
+                    temp_hll.merge(src_hlls)
+                card = temp_hll.count()
+                return Encoder.encode(card)
+            finally:
+                temp_hll.free()
+
+    @staticmethod
+    def __evalPFMERGE(db: int, args: List[str]) -> bytes:
+        if len(args) < 1:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'pfmerge' command")
+        
+        dest_key = args[0]
+        from .internals.HyperLogLog import HyperLogLog, HLL_SIZE
+        from .RedisObject import RedisObject, REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
+        import ctypes
+        
+        dest_val = Store.get(dest_key, db)
+        if dest_val is None:
+            dest_hll = HyperLogLog()
+        else:
+            if not RedisAssertions.assertObjectType(dest_val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+                
+            struct_obj = dest_val.val
+            if struct_obj.size != HLL_SIZE + 1 or ctypes.string_at(struct_obj.ptr, 4) != b"HYLL":
+                return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid HyperLogLog string value")
+                
+            dest_hll = HyperLogLog(ptr=struct_obj.ptr)
+            
+        src_hlls = []
+        for src_key in args[1:]:
+            src_val = Store.get(src_key, db)
+            if src_val is None:
+                continue
+                
+            if not RedisAssertions.assertObjectType(src_val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+                
+            struct_obj = src_val.val
+            if struct_obj.size != HLL_SIZE + 1 or ctypes.string_at(struct_obj.ptr, 4) != b"HYLL":
+                return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid HyperLogLog string value")
+                
+            src_hlls.append(HyperLogLog(ptr=struct_obj.ptr))
+            
+        if src_hlls:
+            dest_hll.merge(src_hlls)
+            
+        if dest_val is None:
+            hll_ptr = dest_hll.release()
+            obj = RedisObject(o_type=REDIS_OBJECT_TYPES.TYPE_STRING, o_encoding=REDIS_OBJECT_ENCODINGS.RAW)
+            obj.val.ptr = hll_ptr
+            obj.val.size = HLL_SIZE + 1
+            Store.put(dest_key, obj, -1, db)
+        else:
+            Store.put(dest_key, dest_val, Store.getExpiry(dest_val, db), db)
+            
+        return RESP_RESPONSES.RESP_OK
+
+    @staticmethod
+    def __evalBFADD(db: int, args: List[str]) -> bytes:
+        if len(args) != 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'bf.add' command")
+            
+        key = args[0]
+        item = args[1]
+        
+        val = Store.get(key, db)
+        
+        from .internals.BloomFilter import BloomFilter, BF_SIZE
+        from .RedisObject import RedisObject, REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
+        import ctypes
+        
+        if val is None:
+            bf = BloomFilter()
+        else:
+            if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+                return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+                
+            struct = val.val
+            if struct.size != BF_SIZE + 1:
+                return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid BloomFilter string value")
+                
+            magic = ctypes.string_at(struct.ptr, 4)
+            if magic != b"BLMF":
+                return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid BloomFilter string value")
+                
+            bf = BloomFilter(ptr=struct.ptr)
+            
+        added = bf.add(item.encode('utf-8'))
+        
+        if val is None:
+            bf_ptr = bf.release()
+            new_val = RedisObject(None, REDIS_OBJECT_TYPES.TYPE_STRING, REDIS_OBJECT_ENCODINGS.RAW)
+            new_val.val.ptr = bf_ptr
+            new_val.val.size = BF_SIZE + 1
+            Store.put(key, new_val, db)
+            
+        return Encoder.encode(1 if added else 0)
+
+    @staticmethod
+    def __evalBFEXISTS(db: int, args: List[str]) -> bytes:
+        if len(args) != 2:
+            return Evaluator.__getErrorResponse("ERR wrong number of arguments for 'bf.exists' command")
+            
+        key = args[0]
+        item = args[1]
+        
+        val = Store.get(key, db)
+        if val is None:
+            return Encoder.encode(0)
+            
+        from .internals.BloomFilter import BloomFilter, BF_SIZE
+        from .RedisObject import RedisObject, REDIS_OBJECT_TYPES
+        import ctypes
+        
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+            
+        struct = val.val
+        if struct.size != BF_SIZE + 1:
+            return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid BloomFilter string value")
+            
+        magic = ctypes.string_at(struct.ptr, 4)
+        if magic != b"BLMF":
+            return Evaluator.__getErrorResponse("WRONGTYPE Key is not a valid BloomFilter string value")
+            
+        bf = BloomFilter(ptr=struct.ptr)
+        exists = bf.exists(item.encode('utf-8'))
+        
+        return Encoder.encode(1 if exists else 0)
 
 
     
