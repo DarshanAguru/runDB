@@ -1,13 +1,39 @@
 import ctypes
 from .sds import SDS
 
+# m = -(n*ln(p) / (ln2 ** 2))
+# m = no. of bits, n = expected number of unique items, p = desired false positive rate
+# k = (m / n) * ln(2)
+# k = number of optimal Hashes
+# For n = 100 unique keys, error percent p = 1%
+# m = 958.5 bits (we use M = 1000)
+# k = 6.64 (we use optimal K = 7)
+
+M = 1000
+K = 7
+NUM_BYTES = (M + 7) // 8
+
 class BloomFilterStruct(ctypes.Structure):
     _fields_ = [
-        ("magic", ctypes.c_char * 4),       # "BLMF"
-        ("bits", ctypes.c_int64)
+        ("magic", ctypes.c_char * 4),
+        ("bits", ctypes.c_ubyte * NUM_BYTES)
     ]
 
 BF_SIZE = ctypes.sizeof(BloomFilterStruct)
+
+
+class BloomFilterHelper:
+    @staticmethod
+    def fnv1a64(data: str | bytes) -> int:
+        if isinstance(data, str):
+            b = data.encode('utf-8')
+        else:
+            b = data
+        h = 0xcbf29ce484222325
+        for byte in b:
+            h ^= byte
+            h = (h * 0x100000001b3) & 0xffffffffffffffff
+        return h
 
 
 class BloomFilter:
@@ -24,7 +50,7 @@ class BloomFilter:
             
             struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(BloomFilterStruct)).contents
             struct_obj.magic = b"BLMF"
-            struct_obj.bits = 0
+            # Memory is already initialized to all 0s via SDS alloc
             
     def free(self):
         self.sds_val.free()
@@ -35,51 +61,45 @@ class BloomFilter:
     
     def add(self, data: str | bytes) -> bool:
         if isinstance(data, str):
-            b = data.encode('utf-8')
+            b_data = data.encode('utf-8')
         else:
-            b = data
-            
-        # FNV-1a 64-bit hash
-        h = 0xcbf29ce484222325
-        for byte in b:
-            h ^= byte
-            h = (h * 0x100000001b3) & 0xffffffffffffffff
-            
-        h1 = h & 0xffffffff
-        h2 = h >> 32
+            b_data = data
+
+        h1 = BloomFilterHelper.fnv1a64(b_data)
+        h2 = BloomFilterHelper.fnv1a64(b"rundbsalt" + b_data)
         
-        mask = 0
-        for i in range(4): # K_HASHES = 4
-            idx = (h1 + i * h2) % 64
-            mask |= (1 << idx)
+        changed = False
+        bits_ptr = ctypes.cast(self.ptr + 4, ctypes.POINTER(ctypes.c_ubyte))
+        
+        for i in range(K):
+            bit_idx = (h1 + i * h2) % M
+            byte_idx = bit_idx // 8
+            bit_pos = bit_idx % 8
             
-        struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(BloomFilterStruct)).contents
-        old_bits = struct_obj.bits
-        new_bits = old_bits | mask
-        if new_bits != old_bits:
-            struct_obj.bits = new_bits
-            return True
-        return False
+            mask = 1 << bit_pos
+            if (bits_ptr[byte_idx] & mask) == 0:
+                bits_ptr[byte_idx] |= mask
+                changed = True
+            
+        return changed
             
     def exists(self, data: str | bytes) -> bool:
         if isinstance(data, str):
-            b = data.encode('utf-8')
+            b_data = data.encode('utf-8')
         else:
-            b = data
-            
-        # FNV-1a 64-bit hash
-        h = 0xcbf29ce484222325
-        for byte in b:
-            h ^= byte
-            h = (h * 0x100000001b3) & 0xffffffffffffffff
-            
-        h1 = h & 0xffffffff
-        h2 = h >> 32
+            b_data = data
+
+        h1 = BloomFilterHelper.fnv1a64(b_data)
+        h2 = BloomFilterHelper.fnv1a64(b"rundbsalt" + b_data)
         
-        struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(BloomFilterStruct)).contents
-        bits = struct_obj.bits
-        for i in range(4): # K_HASHES = 4
-            idx = (h1 + i * h2) % 64
-            if not (bits & (1 << idx)):
+        bits_ptr = ctypes.cast(self.ptr + 4, ctypes.POINTER(ctypes.c_ubyte))
+        
+        for i in range(K):
+            bit_idx = (h1 + i * h2) % M
+            byte_idx = bit_idx // 8
+            bit_pos = bit_idx % 8
+            
+            mask = 1 << bit_pos
+            if (bits_ptr[byte_idx] & mask) == 0:
                 return False
         return True
