@@ -6,12 +6,12 @@ from config import Config
 import asyncio
 import os
 
-async def main_async(args):
+async def main_async():
     # Setup signal handlers
     await Shutdown.handleGracefully()
 
     # Start the server and signal monitor concurrently
-    server_task = asyncio.create_task(Server.runAsyncTcpServer(args.host, args.port))
+    server_task = asyncio.create_task(Server.runAsyncTcpServer(Config.HOST, Config.PORT))
     monitor_task = asyncio.create_task(Shutdown.waitForSignal())
 
     # Wait for signal monitor to finish (SIGTERM/SIGINT triggered, AOF written)
@@ -77,15 +77,55 @@ def main():
     # Run pre-run check
     pre_run_check(logger)
     
-    parser = argparse.ArgumentParser(description="RUNDB: A simple  Key-Value store")
-    parser.add_argument("--host", type=str, default=Config.HOST , help="Host address for run DB │ address (default: %(default)s)")
-    parser.add_argument("--port", type=int, default=Config.PORT, help="Port for RunDB  │ number (default: %(default)s)")                                   
+    parser = argparse.ArgumentParser(description="RUNDB: A simple Key-Value store")
+    parser.add_argument("--config", type=str, default=None, help="Path to config file (e.g. rundb.conf)")
+    parser.add_argument("--host", type=str, default=None, help="Host address for RunDB")
+    parser.add_argument("--port", type=int, default=None, help="Port for RunDB")
+    parser.add_argument("--memory-limit", type=int, default=None, help="Max memory limit in bytes")
+    parser.add_argument("--max-clients", type=int, default=None, help="Max number of concurrent clients")
+    parser.add_argument("--cron-freq-interval", type=float, default=None, help="Periodic interval (in secs) for expiring keys")
+    parser.add_argument("--aof-file", type=str, default=None, help="File name/path for AOF Logging")
+    parser.add_argument("--eviction-strategy", type=str, default=None, help="Eviction strategy name")
+    parser.add_argument("--eviction-ratio", type=float, default=None, help="Eviction ratio (fraction of keys to evict)")
+    parser.add_argument("--db-count", type=int, default=None, help="Number of databases")
+    parser.add_argument("--eviction-pool-size", type=int, default=None, help="Eviction pool size for allkeys-lru")
+    parser.add_argument("--eviction-sample-size", type=int, default=None, help="Sample size for allkeys-lru")
+    
     args = parser.parse_args()
    
-    Printer.printRunDBBanner(args.host, args.port)
+    # Resolution Precedence:
+    # 1. Config file (if specified) overrides defaults / environment variables
+    if args.config:
+        Config.load_from_file(args.config)
+        
+    # 2. Command-line flags override configuration files, env vars, and defaults
+    if args.host is not None:
+        Config.HOST = args.host
+    if args.port is not None:
+        Config.PORT = args.port
+    if args.memory_limit is not None:
+        Config.MEMORY_LIMIT = args.memory_limit
+    if args.max_clients is not None:
+        Config.MAX_CLIENTS = args.max_clients
+    if args.cron_freq_interval is not None:
+        Config.CRON_FREQ_INTERVAL = args.cron_freq_interval
+    if args.aof_file is not None:
+        Config.AOF_FILE = args.aof_file
+    if args.eviction_strategy is not None:
+        Config.EVICTION_STRATEGY = args.eviction_strategy
+    if args.eviction_ratio is not None:
+        Config.EVICTION_RATIO = args.eviction_ratio
+    if args.db_count is not None:
+        Config.DB_COUNT = args.db_count
+    if args.eviction_pool_size is not None:
+        Config.EVICTION_POOL_SIZE = args.eviction_pool_size
+    if args.eviction_sample_size is not None:
+        Config.EVICTION_SAMPLE_SIZE = args.eviction_sample_size
+        
+    Printer.printRunDBBanner(Config.HOST, Config.PORT)
     
     try:
-        asyncio.run(main_async(args))
+        asyncio.run(main_async())
     except KeyboardInterrupt:
         logger.info("Main program interrupted and exited.")
 

@@ -231,24 +231,99 @@ python3 tests/run_tests.py
 
 ## Configuration
 
-Modify `config.py` to adjust system limits:
+**RunDB** supports dynamic, runtime-tunable configuration parameters. The values are resolved using the following order of precedence (highest to lowest):
 
-| Parameter                | Default              | Description                                                                             |
-| ------------------------ | -------------------- | --------------------------------------------------------------------------------------- |
-| `HOST`                 | `"0.0.0.0"`        | Binding address                                                                         |
-| `PORT`                 | `7379`             | Listening port                                                                          |
-| `MEMORY_LIMIT`         | `1,048,576` (1 MB) | Maximum allocated C-memory limit in bytes                                               |
-| `MAX_CLIENTS`          | `10,000`           | Maximum number of concurrent client connections                                         |
-| `CRON_FREQ_INTERVAL`   | `1`                | Periodic time interval (in seconds) for active key expiration check                     |
-| `AOF_FILE`             | `"run-master.aof"` | Filename used for AOF persistence dumping                                               |
-| `EVICTION_STRATEGY`    | `"allkeys-lru"`    | Strategy for memory reclamation (`simple-first`, `allkeys-random`, `allkeys-lru`) |
-| `EVICTION_RATIO`       | `0.1`              | Fraction of keys evicted during eviction                                                |
-| `DB_COUNT`             | `4`                | Number of databases configured in the server                                            |
-| `LRU_BITS_MASK`        | `0x00FFFFFF`       | 24-bit mask for LRU clock tracking                                                      |
-| `EVICTION_POOL_SIZE`   | `16`               | Candidate pool size for `allkeys-lru` eviction strategy                               |
-| `EVICTION_SAMPLE_SIZE` | `5`                | Number of keys sampled on each pass to populate eviction pool                           |
+1. **Command-line Flags**: e.g., `--port 7379 --memory-limit 10485760`
+2. **Configuration File**: A text file loaded via `--config <path>`
+3. **Environment Variables**: Prefixed with `RUNDB_` (e.g. `RUNDB_PORT=7379`)
+4. **Default Values**: Configured in [config.py](file:///home/darshan/Projects/runDB/config.py)
+
+### Tunable Parameters
+
+| Parameter | Environment Variable | CLI Flag | Default | Description |
+| --------- | -------------------- | -------- | ------- | ----------- |
+| `HOST` | `RUNDB_HOST` | `--host` | `"0.0.0.0"` | Binding address |
+| `PORT` | `RUNDB_PORT` | `--port` | `7379` | Listening port |
+| `MEMORY_LIMIT` | `RUNDB_MEMORY_LIMIT` | `--memory-limit` | `1,048,576` (1 MB) | Maximum allocated C-memory limit in bytes |
+| `MAX_CLIENTS` | `RUNDB_MAX_CLIENTS` | `--max-clients` | `10,000` | Maximum number of concurrent connections |
+| `CRON_FREQ_INTERVAL` | `RUNDB_CRON_FREQ_INTERVAL` | `--cron-freq-interval` | `1.0` | Active expiration check interval (seconds) |
+| `AOF_FILE` | `RUNDB_AOF_FILE` | `--aof-file` | `"run-master.aof"` | AOF logging filename/path |
+| `EVICTION_STRATEGY` | `RUNDB_EVICTION_STRATEGY` | `--eviction-strategy` | `"allkeys-lru"` | Eviction strategy (`simple-first`, `allkeys-random`, `allkeys-lru`) |
+| `EVICTION_RATIO` | `RUNDB_EVICTION_RATIO` | `--eviction-ratio` | `0.1` | Fraction of keys evicted during eviction |
+| `DB_COUNT` | `RUNDB_DB_COUNT` | `--db-count` | `4` | Number of databases configured |
+| `EVICTION_POOL_SIZE` | `RUNDB_EVICTION_POOL_SIZE` | `--eviction-pool-size` | `16` | Approximated LRU candidate pool size |
+| `EVICTION_SAMPLE_SIZE`| `RUNDB_EVICTION_SAMPLE_SIZE` | `--eviction-sample-size` | `5` | Keys sampled per pass to populate pool |
+
+### Configuration File Format
+
+Create a key-value text file (e.g. `rundb.conf`) to tune the parameters:
+
+```conf
+# rundb.conf - RunDB configuration file
+port 7379
+memory_limit 10485760
+eviction_strategy allkeys-lru
+aof_file /data/run-master.aof
+```
+
+Run the server with the configuration file:
+```bash
+python3 main.py --config rundb.conf
+```
 
 ---
+
+## Running with Docker & Docker Compose
+
+**RunDB** is packaged with a production-ready, security-hardened Docker configuration.
+
+### Security Hardening Features
+
+- **Base Image**: Uses a minimal and regularly patched `python:3.11-slim-bookworm` image.
+- **Non-Root Execution**: Runs under a restricted system user `rundb` (UID/GID 10001) with no login shell.
+- **Read-Only Root Filesystem**: The container root filesystem is mounted as read-only (`read_only: true`), preventing arbitrary writes.
+- **Privilege Escalation Blocked**: Runs with `no-new-privileges: true` to prevent container processes from gaining new privileges.
+- **Dropped Capabilities**: All standard Linux kernel capabilities are dropped (`cap_drop: [ALL]`).
+
+### Persisting Data with Named Volumes
+
+Since **RunDB** is an in-memory database utilizing an Append Only File (AOF) for persistence, a Docker **named volume** is used to store the AOF file securely outside the container's volatile filesystem.
+
+### Using Docker Compose (Recommended)
+
+1. **Build the Image**:
+   ```bash
+   docker build -t rundb:latest .
+   ```
+
+2. **Start the Database**:
+   ```bash
+   docker compose up -d
+   ```
+   *This automatically builds/launches the container and maps port `7379` to your host, persisting data in the `rundb_data` named volume.*
+
+3. **Stop the Database**:
+   ```bash
+   docker compose down
+   ```
+
+### Running with Docker CLI Directly
+
+To run the container manually with the named volume:
+```bash
+docker run -d \
+  -p 7379:7379 \
+  --name rundb-server \
+  --read-only \
+  --cap-drop=ALL \
+  --security-opt=no-new-privileges:true \
+  -v rundb_data:/data \
+  -e RUNDB_AOF_FILE=/data/run-master.aof \
+  rundb:latest
+```
+
+---
+
 
 ## Supported Commands
 

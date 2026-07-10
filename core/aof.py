@@ -46,6 +46,11 @@ class AOF:
     @staticmethod
     def dumpAllAOF() -> None:
         try:
+            # Ensure the parent directory of Config.AOF_FILE exists
+            parent_dir = os.path.dirname(Config.AOF_FILE)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+
             temp_file = Config.AOF_FILE + ".tmp"
             with open(temp_file, 'wb') as file:
                 logger.debug(f"Child process rewriting AOF file at {temp_file}")
