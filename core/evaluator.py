@@ -188,6 +188,9 @@ class Evaluator:
         if Store.hasExpired(val, db):
             return RESP_RESPONSES.RESP_NIL
         
+        if not RedisAssertions.assertObjectType(val.getType(), REDIS_OBJECT_TYPES.TYPE_STRING):
+            return Evaluator.__getErrorResponse("WRONGTYPE Operation against a key holding the wrong kind of value")
+        
         return Encoder.encode(val.getValue(), bulk=True)
     
     # Returns remaining TTL for a key

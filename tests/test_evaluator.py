@@ -114,5 +114,20 @@ class TestEvaluator(unittest.TestCase):
         self.assertEqual(self.client.sent_data, b"*1\r\n+OK\r\n")
         self.assertFalse(self.client.isTrans)
 
+    def test_get_wrongtype(self):
+        # Create a non-string key (e.g. Set)
+        from core.internals.Set import Set
+        from core.RedisObject import RedisObject, REDIS_OBJECT_TYPES, REDIS_OBJECT_ENCODINGS
+        st = Set()
+        st.add("val")
+        set_obj = RedisObject(st, REDIS_OBJECT_TYPES.TYPE_SET, REDIS_OBJECT_ENCODINGS.HT)
+        Store.put("k_set", set_obj, -1)
+
+        # Try to run GET on it
+        cmd_get = RedisCmd("GET", ["k_set"])
+        self.client.sent_data.clear()
+        Evaluator.evalAndRespond([cmd_get], self.client)
+        self.assertEqual(self.client.sent_data, b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n")
+
 if __name__ == "__main__":
     unittest.main()

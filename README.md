@@ -287,7 +287,15 @@ python3 main.py --config rundb.conf
 
 ### Persisting Data with Named Volumes
 
-Since **RunDB** is an in-memory database utilizing an Append Only File (AOF) for persistence, a Docker **named volume** is used to store the AOF file securely outside the container's volatile filesystem.
+Since **RunDB** is an in-memory database utilizing an Append Only File (AOF) for persistence, a Docker **named volume** (`rundb_data`) is used to store the AOF file securely outside the container's volatile filesystem.
+
+By default, Docker stores this named volume on the host filesystem at the following location:
+- **Linux (Native Docker)**: `/var/lib/docker/volumes/rundb_data/_data/run-master.aof`
+- **macOS / Windows (Docker Desktop)**: Inside the Docker Desktop utility VM. You can inspect or back it up using a helper container:
+  ```bash
+  docker run --rm -it -v rundb_data:/data alpine ls -la /data
+  ```
+
 
 ### Using Docker Compose (Recommended)
 

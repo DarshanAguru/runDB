@@ -2,6 +2,7 @@ import logging
 import io
 import os
 import time
+import ctypes
 from config import Config
 from .Store import Store
 from .RedisObject import RedisObject
@@ -13,8 +14,9 @@ logger = logging.getLogger(__name__)
 # - Serialization/Restoration: Serializes in-memory objects to standard RESP commands (SET, RPUSH, EXPIRE).
 # - Atomic Swap: Writes snapshot to a temporary file (AOF_FILE.tmp) and uses os.replace for an atomic swap.
 # - Replay Engine: Decodes AOF RESP commands using RESPProcessor and evaluates them directly into the Store.
+# - Natively serializes String, List, Set, and Geo database types.
 class AOF:
-    # Dumps a single key-value pair as a SET/RPUSH command in RESP format
+    # Dumps a single key-value pair as a SET/RPUSH/SADD/GEOADD command in RESP format
     @staticmethod
     def dumpKey(file: io.BufferedWriter, key: str, value: int, db_idx: int) -> None:
         if Store.hasExpired(value, db_idx):
@@ -27,6 +29,23 @@ class AOF:
         if robj.getType() == REDIS_OBJECT_TYPES.TYPE_LIST:
             elements = list(robj.getValue())
             tokens = ["RPUSH", key] + [el.decode() for el in elements]
+            encoded_cmd = Encoder.encode(tokens)
+            file.write(encoded_cmd)
+        elif robj.getType() == REDIS_OBJECT_TYPES.TYPE_SET:
+            s_obj = robj.getValue()
+            tokens = ["SADD", key] + [str(member) for member in s_obj]
+            encoded_cmd = Encoder.encode(tokens)
+            file.write(encoded_cmd)
+        elif robj.getType() == REDIS_OBJECT_TYPES.TYPE_GEO:
+            hm = robj.getValue()
+            tokens = ["GEOADD", key]
+            from .internals.Geohash import GeoHashStruct
+            for member, struct_ptr in hm.items():
+                if struct_ptr:
+                    geo_struct = ctypes.cast(struct_ptr, ctypes.POINTER(GeoHashStruct)).contents
+                    tokens.append(f"{geo_struct.lon:.6f}")
+                    tokens.append(f"{geo_struct.lat:.6f}")
+                    tokens.append(member)
             encoded_cmd = Encoder.encode(tokens)
             file.write(encoded_cmd)
         else:

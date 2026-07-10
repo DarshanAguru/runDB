@@ -52,5 +52,69 @@ class TestAOF(unittest.TestCase):
         remaining_ttl = expiry - int(time.time())
         self.assertTrue(0 < remaining_ttl <= 10)
 
+    def test_aof_complex_types_persistence(self):
+        # 1. Prepare a List object
+        from core.internals.QuickList import QuickList
+        ql = QuickList()
+        ql.rpush(b"list_val_1")
+        ql.rpush(b"list_val_2")
+        list_obj = RedisObject(ql, REDIS_OBJECT_TYPES.TYPE_LIST, REDIS_OBJECT_ENCODINGS.QUICKLIST)
+        Store.put("k_list", list_obj, -1, db=0)
+
+        # 2. Prepare a Set object
+        from core.internals.Set import Set
+        st = Set()
+        st.add("set_val_1")
+        st.add("set_val_2")
+        set_obj = RedisObject(st, REDIS_OBJECT_TYPES.TYPE_SET, REDIS_OBJECT_ENCODINGS.HT)
+        Store.put("k_set", set_obj, -1, db=0)
+
+        # 3. Prepare a Geo object
+        from core.internals.HashMap import HashMap
+        from core.internals.Geohash import GeoHashStruct
+        from core.internals.Malloc_internal import MallocInternal
+        import ctypes
+        hm = HashMap("string", "int64")
+        new_ptr = MallocInternal.zcalloc(ctypes.sizeof(GeoHashStruct))
+        struct_obj = ctypes.cast(new_ptr, ctypes.POINTER(GeoHashStruct)).contents
+        struct_obj.lat = 12.34
+        struct_obj.lon = 56.78
+        hm.set("loc1", new_ptr)
+        geo_obj = RedisObject(hm, REDIS_OBJECT_TYPES.TYPE_GEO, REDIS_OBJECT_ENCODINGS.HT)
+        Store.put("k_geo", geo_obj, -1, db=0)
+
+        # Dump to AOF
+        AOF.dumpAllAOF()
+
+        # Clear stores
+        Store.stores[0].clear()
+        Store.expires_list[0].clear()
+
+        # Load from AOF
+        AOF.loadAllAOF()
+
+        # Verify List restoration
+        restored_list = Store.get("k_list", db=0)
+        self.assertIsNotNone(restored_list)
+        self.assertEqual(restored_list.getType(), REDIS_OBJECT_TYPES.TYPE_LIST)
+        self.assertEqual(list(restored_list.getValue()), [b"list_val_1", b"list_val_2"])
+
+        # Verify Set restoration
+        restored_set = Store.get("k_set", db=0)
+        self.assertIsNotNone(restored_set)
+        self.assertEqual(restored_set.getType(), REDIS_OBJECT_TYPES.TYPE_SET)
+        self.assertEqual(set(restored_set.getValue()), {"set_val_1", "set_val_2"})
+
+        # Verify Geo restoration
+        restored_geo = Store.get("k_geo", db=0)
+        self.assertIsNotNone(restored_geo)
+        self.assertEqual(restored_geo.getType(), REDIS_OBJECT_TYPES.TYPE_GEO)
+        restored_hm = restored_geo.getValue()
+        loc1_ptr = restored_hm.get("loc1")
+        self.assertIsNotNone(loc1_ptr)
+        geo_struct = ctypes.cast(loc1_ptr, ctypes.POINTER(GeoHashStruct)).contents
+        self.assertAlmostEqual(geo_struct.lat, 12.34, places=2)
+        self.assertAlmostEqual(geo_struct.lon, 56.78, places=2)
+
 if __name__ == "__main__":
     unittest.main()

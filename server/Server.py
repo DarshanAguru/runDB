@@ -94,7 +94,7 @@ class Server:
                 # Initialize TCP socket (IPv4, Streaming)
                 serverSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 serverSock.bind((host, port))
-                serverSock.listen()
+                serverSock.listen(404) # queue size of 404 (pending connections queue size)
                 serverSock.setblocking(False) # Non-blocking for async handling
                 
                 # NOTE: Due to usage of 'epoll' system call which is linux specific,
@@ -145,22 +145,23 @@ class Server:
                                             if fd == serverSock.fileno():
                                                 if Shutdown.is_shutdown_requested:
                                                     continue
-                                                try:
-                                                    sock, addr = serverSock.accept()
-                                                except BlockingIOError:
-                                                    continue
-                                                sock.setblocking(False) # Ensure client socket is also non-blocking
-                                                client = Client(FDComm(sock.fileno()))
-                                                client.sock = sock
-                                                Server.con_clients[sock.fileno()] = client
-                                                if len(Server.con_clients) > Config.MAX_CLIENTS:
-                                                    logger.warning(f"Maximum number of clients reached: {len(Server.con_clients)}")
-                                                    del Server.con_clients[sock.fileno()]
-                                                    sock.close()
-                                                    continue
-                                                # Register client socket to watch for incoming data
-                                                epoll.register(sock.fileno(), select.EPOLLIN)
-                                                logger.debug(f"Connected to remote address: {addr} and fd: {sock.fileno()}, no. of concurrent clients: {len(Server.con_clients)}")
+                                                while True:
+                                                    try:
+                                                        sock, addr = serverSock.accept()
+                                                    except (BlockingIOError, OSError):
+                                                        break
+                                                    sock.setblocking(False) # Ensure client socket is also non-blocking
+                                                    client = Client(FDComm(sock.fileno()))
+                                                    client.sock = sock
+                                                    Server.con_clients[sock.fileno()] = client
+                                                    if len(Server.con_clients) > Config.MAX_CLIENTS:
+                                                        logger.warning(f"Maximum number of clients reached: {len(Server.con_clients)}")
+                                                        del Server.con_clients[sock.fileno()]
+                                                        sock.close()
+                                                        continue
+                                                    # Register client socket to watch for incoming data
+                                                    epoll.register(sock.fileno(), select.EPOLLIN)
+                                                    logger.debug(f"Connected to remote address: {addr} and fd: {sock.fileno()}, no. of concurrent clients: {len(Server.con_clients)}")
                                             else:
                                                 # Handle client disconnection or errors
                                                 if event & (select.EPOLLHUP | select.EPOLLERR):

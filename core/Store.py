@@ -36,6 +36,13 @@ class Store(metaclass=StoreMeta):
 
         # Transfer ownership to the store and get the raw struct pointer address
         ptr = value.release()
+
+        # Delete existing key first if present (and is a different pointer) to prevent memory leaks from overwrites
+        if key in cls.stores[db]:
+            old_ptr = cls.stores[db].get(key)
+            if old_ptr != ptr:
+                cls.delete(key, db)
+
         cls.stores[db].set(key, ptr)
         
         if ex_duration_sec > 0:

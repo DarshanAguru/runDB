@@ -18,11 +18,14 @@ class Expiration:
         expire_count = 0
         store = Store.stores[db]
         
-        if not store:
+        if not store or len(store) == 0:
             return 0.0
 
         # Sample keys first to avoid RuntimeError: dictionary changed size during iteration
         sampled_keys = random.sample(list(store.keys()), min(limit, len(store)))
+        if not sampled_keys:
+            return 0.0
+
         for k in sampled_keys:
             v = store.get(k)
             if v is None:

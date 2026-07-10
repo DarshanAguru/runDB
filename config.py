@@ -14,7 +14,7 @@ class Config:
     DB_COUNT = int(os.getenv("RUNDB_DB_COUNT", "4"))                             # DB count
     LRU_BITS_MASK = 0x00FFFFFF                                                   # 24 bit mask for LRU Clock (DONT CHANGE)
     EVICTION_POOL_SIZE = int(os.getenv("RUNDB_EVICTION_POOL_SIZE", "16"))        # Eviction pool size for all-keys LRU eviction strategy
-    EVICTION_SAMPLE_SIZE = int(os.getenv("RUNDB_EVICTION_SAMPLE_SIZE", "5"))
+    EVICTION_SAMPLE_SIZE = int(os.getenv("RUNDB_EVICTION_SAMPLE_SIZE", "5"))     # Evection pool Sample size (No. of random samples to pick)
 
     @classmethod
     def load_from_file(cls, filepath: str):
