@@ -2,7 +2,9 @@ import ctypes
 import weakref
 import struct
 from .Malloc_internal import MallocInternal
+from .Hashers import Hashers
 from typing import Any
+
 
 class HashMapStruct(ctypes.Structure):
     _fields_ = [
@@ -10,30 +12,22 @@ class HashMapStruct(ctypes.Structure):
         ("count", ctypes.c_uint32),
     ]
 
-# HashMap Helper provides FNV-1a hashing and state flag definitions:
-# - FNV-1a: 32-bit offset/prime hashing provides fast, well-distributed keyspace dispersion.
+# HashMap Helper provides FNV-1a hashing (via Hashers) and state flag definitions:
+# - FNV-1a: 32-bit hash providing fast, well-distributed keyspace dispersion.
 # - Open Addressing & Linear Probing: Resolves slot collisions by incrementing slots sequentially.
 # - Tombstoning: State flags (EMPTY, OCCUPIED, TOMBSTONE) allow deleting keys without breaking 
 #   the search/probing sequence of subsequently inserted keys.
 class HashMapHelper:
     DEFAULT_CAPACITY = 16
     CAPACITY_INC_THRESHOLD = 0.7
-    
-    EMPTY_STATE = 0
-    OCCUPIED_STATE = 1
+
+    EMPTY_STATE     = 0
+    OCCUPIED_STATE  = 1
     TOMBSTONE_STATE = 2
 
-    FNV1A_OFFSET = 2166136261 
-    FNV1A_PRIME = 16777619
-    MASK_INT32 = 0xFFFFFFFF
-
     @staticmethod
-    def hashKey(key_bytes: bytes):
-        h = HashMapHelper.FNV1A_OFFSET
-        for b in key_bytes:
-            h ^= b
-            h = ( h * HashMapHelper.FNV1A_PRIME) & HashMapHelper.MASK_INT32
-        return h
+    def hashKey(key_bytes: bytes) -> int:
+        return Hashers.fnv1a(key_bytes)
 
 class HashMap:
     def __init__(self, keyType: str, valType: str, ptr=None):

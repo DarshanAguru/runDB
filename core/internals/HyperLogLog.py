@@ -1,12 +1,13 @@
 import ctypes
-import weakref
-import hashlib
-import struct
 import math
-from .Malloc_internal import MallocInternal
 from .sds import SDS
+from .Hashers import Hashers
 
-HLL_REGISTERS = 16384
+
+HLL_REG_BITS = 14
+HLL_REG_MASK = (1 << HLL_REG_BITS) - 1
+HLL_REGISTERS = 1 << HLL_REG_BITS
+CARD_BITS = 64 - HLL_REG_BITS
 
 class HyperLogLogStruct(ctypes.Structure):
     _fields_ = [
@@ -19,10 +20,6 @@ class HyperLogLogStruct(ctypes.Structure):
 
 # The total size of the HyperLogLog structure in bytes
 HLL_SIZE = ctypes.sizeof(HyperLogLogStruct)
-
-def hll_hash(value: bytes) -> int:
-    h = hashlib.sha256(value).digest()
-    return struct.unpack(">Q", h[:8])[0]
 
 
 class HyperLogLog:
@@ -51,14 +48,14 @@ class HyperLogLog:
         return self.sds_val.release()
 
     def add(self, element: bytes) -> bool:
-        h = hll_hash(element)
-        idx = h & 0x3FFF       # Lower 14 bits for register index (16384 registers)
-        val = h >> 14          # Remaining 50 bits
+        h = Hashers.murmur64a(element)
+        idx = h & HLL_REG_MASK       # Lower 14 bits for register index (16384 registers)
+        val = h >> HLL_REG_BITS      # Remaining 50 bits
         
         if val == 0:
-            zeros = 50
+            zeros = CARD_BITS
         else:
-            zeros = 50 - val.bit_length()
+            zeros = CARD_BITS - val.bit_length()
         rank = zeros + 1
         
         struct_obj = ctypes.cast(self.ptr, ctypes.POINTER(HyperLogLogStruct)).contents
