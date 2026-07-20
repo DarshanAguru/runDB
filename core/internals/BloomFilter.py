@@ -1,5 +1,7 @@
+from core.internals.Hashers import Hashers
 import ctypes
 from .sds import SDS
+from .Hashers import Hashers
 
 # m = -(n*ln(p) / (ln2 ** 2))
 # m = no. of bits, n = expected number of unique items, p = desired false positive rate
@@ -20,20 +22,6 @@ class BloomFilterStruct(ctypes.Structure):
     ]
 
 BF_SIZE = ctypes.sizeof(BloomFilterStruct)
-
-
-class BloomFilterHelper:
-    @staticmethod
-    def fnv1a64(data: str | bytes) -> int:
-        if isinstance(data, str):
-            b = data.encode('utf-8')
-        else:
-            b = data
-        h = 0xcbf29ce484222325
-        for byte in b:
-            h ^= byte
-            h = (h * 0x100000001b3) & 0xffffffffffffffff
-        return h
 
 
 class BloomFilter:
@@ -65,8 +53,8 @@ class BloomFilter:
         else:
             b_data = data
 
-        h1 = BloomFilterHelper.fnv1a64(b_data)
-        h2 = BloomFilterHelper.fnv1a64(b"rundbsalt" + b_data)
+        h1 = Hashers.fnv1a(b_data)
+        h2 = Hashers.fnv1a(b"rundbsalt" + b_data)
         
         changed = False
         bits_ptr = ctypes.cast(self.ptr + 4, ctypes.POINTER(ctypes.c_ubyte))
@@ -89,8 +77,8 @@ class BloomFilter:
         else:
             b_data = data
 
-        h1 = BloomFilterHelper.fnv1a64(b_data)
-        h2 = BloomFilterHelper.fnv1a64(b"rundbsalt" + b_data)
+        h1 = Hashers.fnv1a(b_data)
+        h2 = Hashers.fnv1a(b"rundbsalt" + b_data)
         
         bits_ptr = ctypes.cast(self.ptr + 4, ctypes.POINTER(ctypes.c_ubyte))
         

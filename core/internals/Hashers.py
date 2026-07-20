@@ -5,18 +5,34 @@ class Hashers:
     _MH64A_MASK = 0xFFFFFFFFFFFFFFFF
     _MH64A_SEED = 0                       # fixed seed (matches Redis default)
 
-    # --- 32-bit FNV-1a constants (used for HashMap slot dispatch) ---
-    _FNV1A_OFFSET = 2166136261
-    _FNV1A_PRIME  = 16777619
-    _FNV1A_MASK   = 0xFFFFFFFF
+     # ---------- 64-bit FNV-1a ----------
+    _FNV1A_OFFSET = 0xCBF29CE484222325
+    _FNV1A_PRIME  = 0x100000001B3
+    _FNV1A_MASK   = 0xFFFFFFFFFFFFFFFF
+    _MURMUR_HASH_FINALISERS = (
+     0xff51afd7ed558ccd,  
+     0xc4ceb9fe1a85ec53  
+    )
 
-    # Fnv1A - For fast, static, non cryptographic hashing. Use for HashMaps slot dispatch, and any scenario where,
+    # Fmix Algorithm -- FNV1A with MurMurHash3 finaliser
     @staticmethod
-    def fnv1a(value: bytes) -> int:
+    def fnv1a(value: str | bytes) -> int:
+        if isinstance(value, str):
+            value = value.encode("utf-8")
+
         h = Hashers._FNV1A_OFFSET
+
         for b in value:
             h ^= b
             h = (h * Hashers._FNV1A_PRIME) & Hashers._FNV1A_MASK
+
+        # MurmurHash3 Finaliser
+        h ^= h >> 33
+        h = (h * Hashers._MURMUR_HASH_FINALISERS[0]) & Hashers._FNV1A_MASK
+        h ^= h >> 33
+        h = (h * Hashers._MURMUR_HASH_FINALISERS[1]) & Hashers._FNV1A_MASK
+        h ^= h >> 33
+        
         return h
 
     # MurmurHash64A —  Redis like  implementation for HyperLogLog.
