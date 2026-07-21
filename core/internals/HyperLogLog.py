@@ -75,7 +75,7 @@ class HyperLogLog:
         
         sum_val = 0.0
         for r in struct_obj.registers:
-            sum_val += 2.0 ** -r
+            sum_val += math.ldexp(1.0, -r)  # 2^-r
             
         # Raw estimate
         E = alpha * (m ** 2) / sum_val
